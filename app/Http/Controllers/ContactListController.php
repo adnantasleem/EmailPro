@@ -380,6 +380,8 @@ class ContactListController extends Controller
                 $suffix = '_all';
         }
         
+        $query->orderBy('id');
+        
         $filename = preg_replace('/[^a-zA-Z0-9_-]/', '_', $contactList->name) . $suffix . '.csv';
 
         return response()->streamDownload(function () use ($query) {
@@ -387,7 +389,8 @@ class ContactListController extends Controller
 
             // Collect unique custom field keys in a memory-efficient way
             $customFieldKeys = [];
-            $query->chunk(1000, function ($contacts) use (&$customFieldKeys) {
+            $queryClone = clone $query;
+            $queryClone->chunk(1000, function ($contacts) use (&$customFieldKeys) {
                 foreach ($contacts as $contact) {
                     if ($contact->custom_fields && is_array($contact->custom_fields)) {
                         foreach (array_keys($contact->custom_fields) as $key) {

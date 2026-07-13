@@ -115,6 +115,8 @@ class RecipientController extends Controller
             $query->where('status', $request->status);
         }
 
+        $query->orderBy('id');
+
         $filename = "campaign_{$campaign->id}_recipients.csv";
 
         return response()->streamDownload(function () use ($query) {
