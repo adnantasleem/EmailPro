@@ -115,33 +115,28 @@ class RecipientController extends Controller
             $query->where('status', $request->status);
         }
 
-        $recipients = $query->get();
-
         $filename = "campaign_{$campaign->id}_recipients.csv";
 
-        $headers = [
-            'Content-Type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
-        ];
-
-        $callback = function () use ($recipients) {
+        return response()->streamDownload(function () use ($query) {
             $file = fopen('php://output', 'w');
             fputcsv($file, ['Email', 'Name', 'Status', 'Sent At', 'Error']);
 
-            foreach ($recipients as $recipient) {
-                fputcsv($file, [
-                    $recipient->email,
-                    $recipient->name ?? '',
-                    $recipient->status,
-                    $recipient->sent_at?->format('Y-m-d H:i:s') ?? '',
-                    $recipient->error_message ?? '',
-                ]);
-            }
+            $query->chunk(1000, function ($recipients) use ($file) {
+                foreach ($recipients as $recipient) {
+                    fputcsv($file, [
+                        $recipient->email,
+                        $recipient->name ?? '',
+                        $recipient->status,
+                        $recipient->sent_at?->format('Y-m-d H:i:s') ?? '',
+                        $recipient->error_message ?? '',
+                    ]);
+                }
+            });
 
             fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        }, $filename, [
+            'Content-Type' => 'text/csv',
+        ]);
     }
 
     /**

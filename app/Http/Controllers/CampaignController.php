@@ -880,43 +880,41 @@ class CampaignController extends Controller
             abort(403);
         }
 
-        $recipients = $campaign->recipients()->orderBy('email')->get();
+        $filename = "campaign_{$campaign->id}_export.csv";
 
-        // Create temp file
-        $tempFile = tempnam(sys_get_temp_dir(), 'campaign_export_');
-        $handle = fopen($tempFile, 'w');
+        return response()->streamDownload(function () use ($campaign) {
+            $handle = fopen('php://output', 'w');
 
-        // Write CSV header
-        fputcsv($handle, [
-            'email',
-            'name',
-            'status',
-            'sent_at',
-            'opened_at',
-            'open_count',
-            'error_message'
-        ]);
-
-        // Write data rows
-        foreach ($recipients as $recipient) {
+            // Write CSV header
             fputcsv($handle, [
-                $recipient->email,
-                $recipient->name ?? '',
-                $recipient->status,
-                $recipient->sent_at?->format('Y-m-d H:i:s') ?? '',
-                $recipient->opened_at?->format('Y-m-d H:i:s') ?? '',
-                $recipient->open_count,
-                $recipient->error_message ?? ''
+                'email',
+                'name',
+                'status',
+                'sent_at',
+                'opened_at',
+                'open_count',
+                'error_message'
             ]);
-        }
 
-        fclose($handle);
+            // Write data rows in chunks
+            $campaign->recipients()->orderBy('email')->chunk(1000, function ($recipients) use ($handle) {
+                foreach ($recipients as $recipient) {
+                    fputcsv($handle, [
+                        $recipient->email,
+                        $recipient->name ?? '',
+                        $recipient->status,
+                        $recipient->sent_at?->format('Y-m-d H:i:s') ?? '',
+                        $recipient->opened_at?->format('Y-m-d H:i:s') ?? '',
+                        $recipient->open_count,
+                        $recipient->error_message ?? ''
+                    ]);
+                }
+            });
 
-        $filename = preg_replace('/[^a-zA-Z0-9_-]/', '_', $campaign->name) . '_recipients.csv';
-
-        return response()->download($tempFile, $filename, [
+            fclose($handle);
+        }, $filename, [
             'Content-Type' => 'text/csv',
-        ])->deleteFileAfterSend(true);
+        ]);
     }
 
     /**

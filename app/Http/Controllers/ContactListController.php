@@ -380,65 +380,65 @@ class ContactListController extends Controller
                 $suffix = '_all';
         }
         
-        $contacts = $query->get();
         $filename = preg_replace('/[^a-zA-Z0-9_-]/', '_', $contactList->name) . $suffix . '.csv';
 
-        // Collect all unique custom field keys across all contacts
-        $customFieldKeys = [];
-        foreach ($contacts as $contact) {
-            if ($contact->custom_fields && is_array($contact->custom_fields)) {
-                foreach (array_keys($contact->custom_fields) as $key) {
-                    if (!in_array($key, $customFieldKeys)) {
-                        $customFieldKeys[] = $key;
+        return response()->streamDownload(function () use ($query) {
+            $handle = fopen('php://output', 'w');
+
+            // Collect unique custom field keys in a memory-efficient way
+            $customFieldKeys = [];
+            $query->chunk(1000, function ($contacts) use (&$customFieldKeys) {
+                foreach ($contacts as $contact) {
+                    if ($contact->custom_fields && is_array($contact->custom_fields)) {
+                        foreach (array_keys($contact->custom_fields) as $key) {
+                            if (!in_array($key, $customFieldKeys)) {
+                                $customFieldKeys[] = $key;
+                            }
+                        }
                     }
                 }
-            }
-        }
+            });
 
-        // Create temp file
-        $tempFile = tempnam(sys_get_temp_dir(), 'csv_');
-        $handle = fopen($tempFile, 'w');
-        
-        // Build header: base columns + all custom fields
-        $headers = [
-            'email',
-            'name',
-            'validation_status',
-            'validation_error',
-            'created_at',
-            'validated_at',
-        ];
-        
-        // Add custom field columns
-        foreach ($customFieldKeys as $key) {
-            $headers[] = $key;
-        }
-        
-        fputcsv($handle, $headers);
-        
-        // Write data rows
-        foreach ($contacts as $contact) {
-            $row = [
-                $contact->email,
-                $contact->name ?? '',
-                $contact->validation_status,
-                $contact->validation_error ?? '',
-                $contact->created_at?->format('Y-m-d H:i:s') ?? '',
-                $contact->validated_at?->format('Y-m-d H:i:s') ?? '',
+            // Write CSV header
+            $header = [
+                'email',
+                'name',
+                'validation_status',
+                'validation_error',
+                'created_at',
+                'validated_at'
             ];
-            
-            // Add custom field values
             foreach ($customFieldKeys as $key) {
-                $row[] = $contact->custom_fields[$key] ?? '';
+                $header[] = $key;
             }
-            
-            fputcsv($handle, $row);
-        }
-        fclose($handle);
+            fputcsv($handle, $header);
 
-        return response()->download($tempFile, $filename, [
+            // Write data rows in chunks
+            $query->chunk(1000, function ($contacts) use ($handle, $customFieldKeys) {
+                foreach ($contacts as $contact) {
+                    $row = [
+                        $contact->email,
+                        $contact->name ?? '',
+                        $contact->validation_status,
+                        $contact->validation_error ?? '',
+                        $contact->created_at?->format('Y-m-d H:i:s') ?? '',
+                        $contact->validated_at?->format('Y-m-d H:i:s') ?? ''
+                    ];
+
+                    foreach ($customFieldKeys as $key) {
+                        $row[] = $contact->custom_fields[$key] ?? '';
+                    }
+
+                    fputcsv($handle, $row);
+                }
+            });
+
+            fclose($handle);
+        }, $filename, [
             'Content-Type' => 'text/csv',
-        ])->deleteFileAfterSend(true);
+            'Cache-Control' => 'no-cache, must-revalidate',
+            'Expires' => '0',
+        ]);
     }
 
     /**
