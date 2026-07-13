@@ -129,8 +129,9 @@
             </div>
 
             <!-- Error Breakdown -->
+            <!-- Error Breakdown -->
             @if(count($errorCategories) > 0)
-            <div class="p-8">
+            <div class="p-8 border-b border-gray-100">
                 <h2 class="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
                     <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                     Error Breakdown
@@ -144,6 +145,50 @@
                             </div>
                         @endforeach
                     </div>
+                </div>
+            </div>
+            @endif
+
+            <!-- Daily Breakdown -->
+            @if($dailyStats->count() > 0)
+            <div class="p-8">
+                <h2 class="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+                    <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    Daily Sending Activity
+                </h2>
+                <div class="overflow-x-auto rounded-lg border border-gray-200">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Sent successfully</th>
+                                <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Failed</th>
+                                <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Bounced</th>
+                                <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total Attempted</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            @foreach($dailyStats as $stat)
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    {{ \Carbon\Carbon::parse($stat->date)->format('M d, Y') }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-center text-green-600 font-semibold">
+                                    {{ $stat->sent }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-center text-red-600 font-semibold">
+                                    {{ $stat->failed }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-center text-orange-500 font-semibold">
+                                    {{ $stat->bounced }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 font-bold bg-gray-50">
+                                    {{ $stat->total }}
+                                </td>
+                            </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
                 </div>
             </div>
             @endif

@@ -313,13 +313,30 @@ class CampaignController extends Controller
         }
         arsort($errorCategories);
 
+        // Daily breakdown
+        $dailyStats = $campaign->recipients()
+            ->selectRaw('DATE(COALESCE(sent_at, updated_at)) as date')
+            ->selectRaw('COUNT(*) as total')
+            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as sent', [\App\Models\Recipient::STATUS_SENT])
+            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as failed', [\App\Models\Recipient::STATUS_FAILED])
+            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as bounced', [\App\Models\Recipient::STATUS_BOUNCED])
+            ->whereIn('status', [
+                \App\Models\Recipient::STATUS_SENT, 
+                \App\Models\Recipient::STATUS_FAILED, 
+                \App\Models\Recipient::STATUS_BOUNCED
+            ])
+            ->groupBy('date')
+            ->orderBy('date', 'desc')
+            ->get();
+
         return view('campaigns.report', compact(
             'campaign',
             'stats',
             'subjectStats',
             'bodyStats',
             'duration',
-            'errorCategories'
+            'errorCategories',
+            'dailyStats'
         ));
     }
 
