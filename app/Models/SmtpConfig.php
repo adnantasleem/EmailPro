@@ -152,7 +152,30 @@ class SmtpConfig extends Model
             return false;
         }
         
-        return $this->is_active && $this->sent_today < $this->getEffectiveLimit();
+        if (!$this->is_active) {
+            return false;
+        }
+
+        $dailyLimit = $this->getEffectiveLimit();
+        if ($this->sent_today >= $dailyLimit) {
+            return false;
+        }
+
+        // Anti-Burst 1: Enforce hourly limit (Daily Limit / 24)
+        $hourlyLimit = (int) ceil($dailyLimit / 24);
+        if ($this->sent_last_hour >= $hourlyLimit) {
+            return false;
+        }
+
+        // Anti-Burst 2: Enforce pacing between emails (Intra-hour spacing)
+        $minSecondsBetweenEmails = (int) floor(3600 / $hourlyLimit);
+        $lastSentAt = \Illuminate\Support\Facades\Cache::get("smtp_{$this->id}_last_sent");
+        
+        if ($lastSentAt && (now()->timestamp - $lastSentAt) < $minSecondsBetweenEmails) {
+            return false; // Waiting for the required time interval to pass
+        }
+        
+        return true;
     }
 
     /**
@@ -329,6 +352,9 @@ class SmtpConfig extends Model
         $this->increment('total_sent');
         $this->increment('sent_last_hour');
         $this->increment('sent_today');
+        
+        // Record exact timestamp to enforce intra-hour pacing
+        \Illuminate\Support\Facades\Cache::put("smtp_{$this->id}_last_sent", now()->timestamp, 3600);
         
         $this->recalculateBounceRate();
     }
