@@ -249,12 +249,13 @@ class CampaignController extends Controller
             ->limit(50)
             ->get();
 
-        // Get recipients who opened emails
         $openedRecipients = $campaign->recipients()
             ->whereNotNull('opened_at')
             ->orderBy('opened_at', 'desc')
             ->limit(50)
             ->get();
+
+        $smtpConfigs = \App\Models\SmtpConfig::where('user_id', auth()->id())->active()->orderBy('name')->get();
 
         return view('campaigns.show', compact(
             'campaign',
@@ -263,7 +264,8 @@ class CampaignController extends Controller
             'bodyStats',
             'recentLogs',
             'failedRecipients',
-            'openedRecipients'
+            'openedRecipients',
+            'smtpConfigs'
         ));
     }
 
@@ -545,8 +547,47 @@ class CampaignController extends Controller
 
         $campaign->delete();
 
-        return redirect()->route('campaigns.index')
-            ->with('success', 'Campaign deleted successfully.');
+        return redirect()->route('campaigns.index')->with('success', 'Campaign deleted successfully.');
+    }
+
+    /**
+     * Send a test email for the campaign.
+     */
+    public function sendTestEmail(Request $request, Campaign $campaign, \App\Services\EmailSenderService $emailSender)
+    {
+        if ($campaign->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'test_email' => 'required|email',
+            'smtp_id' => 'required|exists:smtp_configs,id',
+            'subject_id' => 'required|exists:subject_lines,id',
+            'body_id' => 'required|exists:body_templates,id',
+            'first_name' => 'nullable|string|max:255',
+            'last_name' => 'nullable|string|max:255',
+        ]);
+
+        $variableData = [
+            'first_name' => $validated['first_name'] ?? null,
+            'last_name' => $validated['last_name'] ?? null,
+            'name' => trim(($validated['first_name'] ?? '') . ' ' . ($validated['last_name'] ?? '')),
+        ];
+
+        $result = $emailSender->sendTestEmail(
+            $campaign,
+            $validated['test_email'],
+            $validated['smtp_id'],
+            $validated['subject_id'],
+            $validated['body_id'],
+            $variableData
+        );
+
+        if ($result['success']) {
+            return back()->with('success', 'Test email sent successfully!');
+        } else {
+            return back()->with('error', 'Failed to send test email: ' . $result['error']);
+        }
     }
 
     /**

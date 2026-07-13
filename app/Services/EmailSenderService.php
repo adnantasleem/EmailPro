@@ -283,4 +283,53 @@ class EmailSenderService
 
         return $results;
     }
+
+    /**
+     * Send a test email for a campaign without affecting analytics or quotas.
+     */
+    public function sendTestEmail(
+        Campaign $campaign,
+        string $testEmailAddress,
+        int $smtpId,
+        int $subjectId,
+        int $bodyId,
+        array $variableData = []
+    ): array {
+        $result = [
+            'success' => false,
+            'error' => null,
+        ];
+
+        try {
+            $smtp = SmtpConfig::findOrFail($smtpId);
+            $subject = SubjectLine::findOrFail($subjectId);
+            $body = BodyTemplate::findOrFail($bodyId);
+
+            // Create a mock recipient
+            $recipient = new Recipient([
+                'campaign_id' => $campaign->id,
+                'email' => $testEmailAddress,
+                'name' => $variableData['name'] ?? null,
+                'first_name' => $variableData['first_name'] ?? null,
+                'last_name' => $variableData['last_name'] ?? null,
+                'status' => Recipient::STATUS_VALID,
+            ]);
+            // Force an ID for things like unsubscribe URLs
+            $recipient->id = 999999999; 
+
+            // Prepare email content with variable replacement
+            $unsubscribeUrl = $recipient->getUnsubscribeUrl();
+            $htmlContent = $body->getProcessedHtml($recipient, $unsubscribeUrl);
+            $plainContent = $body->getProcessedPlainText($recipient, $unsubscribeUrl);
+
+            // Send the email directly (bypasses EmailLog and Quota tracking)
+            $this->dispatchEmail($campaign, $smtp, $recipient, $subject->subject, $htmlContent, $plainContent);
+
+            $result['success'] = true;
+        } catch (Exception $e) {
+            $result['error'] = $e->getMessage();
+        }
+
+        return $result;
+    }
 }
