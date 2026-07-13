@@ -40,6 +40,12 @@ class SmtpConfig extends Model
         'from_email',
         'from_name',
         'daily_limit',
+        'min_emails_per_hour',
+        'max_emails_per_hour',
+        'current_hourly_limit',
+        'limit_calculated_at',
+        'active_time_start',
+        'active_time_end',
         'sent_today',
         'last_reset_date',
         'is_active',
@@ -63,6 +69,10 @@ class SmtpConfig extends Model
     protected $casts = [
         'port' => 'integer',
         'daily_limit' => 'integer',
+        'min_emails_per_hour' => 'integer',
+        'max_emails_per_hour' => 'integer',
+        'current_hourly_limit' => 'integer',
+        'limit_calculated_at' => 'datetime',
         'sent_today' => 'integer',
         'is_active' => 'boolean',
         'last_reset_date' => 'date',
@@ -134,7 +144,7 @@ class SmtpConfig extends Model
     }
 
     /**
-     * Check if SMTP can send more emails today.
+     * Check if SMTP can send more emails right now.
      */
     public function canSend(): bool
     {
@@ -156,13 +166,47 @@ class SmtpConfig extends Model
             return false;
         }
 
+        // Active Time Check (e.g. only send between 09:00 and 17:00)
+        if (!empty($this->active_time_start) && !empty($this->active_time_end)) {
+            $nowTime = now()->format('H:i:s');
+            // Handle times that span across midnight (e.g., 22:00 to 06:00)
+            if ($this->active_time_start > $this->active_time_end) {
+                if ($nowTime < $this->active_time_start && $nowTime > $this->active_time_end) {
+                    return false;
+                }
+            } else {
+                // Normal daytime shift
+                if ($nowTime < $this->active_time_start || $nowTime > $this->active_time_end) {
+                    return false;
+                }
+            }
+        }
+
         $dailyLimit = $this->getEffectiveLimit();
         if ($this->sent_today >= $dailyLimit) {
             return false;
         }
 
-        // Anti-Burst 1: Enforce hourly limit (Daily Limit / 24)
-        $hourlyLimit = (int) ceil($dailyLimit / 24);
+        // Calculate dynamic hourly limit for this hour if needed
+        $startOfHour = now()->startOfHour();
+        if (!$this->limit_calculated_at || $this->limit_calculated_at->lt($startOfHour)) {
+            $min = $this->min_emails_per_hour ?? max(1, (int) floor($dailyLimit / 24));
+            $max = $this->max_emails_per_hour ?? max(1, (int) ceil($dailyLimit / 24));
+            
+            // Ensure min is <= max
+            if ($min > $max) {
+                $min = $max;
+            }
+
+            $this->update([
+                'current_hourly_limit' => rand($min, $max),
+                'limit_calculated_at' => now(),
+            ]);
+        }
+
+        $hourlyLimit = max(1, $this->current_hourly_limit);
+
+        // Anti-Burst 1: Enforce hourly limit
         if ($this->sent_last_hour >= $hourlyLimit) {
             return false;
         }

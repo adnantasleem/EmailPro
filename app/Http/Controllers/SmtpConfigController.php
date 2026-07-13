@@ -75,6 +75,10 @@ class SmtpConfigController extends Controller
             'from_email' => 'required|email|max:255',
             'from_name' => 'required|string|max:255',
             'daily_limit' => 'required|integer|min:1|max:100000',
+            'min_emails_per_hour' => 'nullable|integer|min:1|max:100000',
+            'max_emails_per_hour' => 'nullable|integer|min:1|max:100000|gte:min_emails_per_hour',
+            'active_time_start' => 'nullable|date_format:H:i',
+            'active_time_end' => 'nullable|date_format:H:i|required_with:active_time_start',
             'is_active' => 'boolean',
         ]);
 
@@ -124,6 +128,10 @@ class SmtpConfigController extends Controller
             'from_email' => 'required|email|max:255',
             'from_name' => 'required|string|max:255',
             'daily_limit' => 'required|integer|min:1|max:100000',
+            'min_emails_per_hour' => 'nullable|integer|min:1|max:100000',
+            'max_emails_per_hour' => 'nullable|integer|min:1|max:100000|gte:min_emails_per_hour',
+            'active_time_start' => 'nullable|date_format:H:i',
+            'active_time_end' => 'nullable|date_format:H:i|required_with:active_time_start',
             'is_active' => 'boolean',
         ]);
 

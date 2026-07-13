@@ -93,28 +93,7 @@
                         </div>
                     </div>
 
-                    <!-- Rate Limiting -->
-                    <div class="mb-6 p-4 bg-gray-50 rounded-lg">
-                        <h3 class="text-lg font-medium text-gray-900 mb-4">Rate Limiting & Delays</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <x-input-label for="emails_per_hour" :value="__('Emails Per Hour')" />
-                                <x-text-input id="emails_per_hour" name="emails_per_hour" type="number" class="mt-1 block w-full" :value="old('emails_per_hour', 100)" required min="1" max="10000" />
-                                <x-input-error :messages="$errors->get('emails_per_hour')" class="mt-2" />
-                            </div>
-                            <div>
-                                <x-input-label for="min_delay_seconds" :value="__('Min Delay (seconds)')" />
-                                <x-text-input id="min_delay_seconds" name="min_delay_seconds" type="number" class="mt-1 block w-full" :value="old('min_delay_seconds', 5)" required min="0" max="300" />
-                                <x-input-error :messages="$errors->get('min_delay_seconds')" class="mt-2" />
-                            </div>
-                            <div>
-                                <x-input-label for="max_delay_seconds" :value="__('Max Delay (seconds)')" />
-                                <x-text-input id="max_delay_seconds" name="max_delay_seconds" type="number" class="mt-1 block w-full" :value="old('max_delay_seconds', 15)" required min="0" max="300" />
-                                <x-input-error :messages="$errors->get('max_delay_seconds')" class="mt-2" />
-                            </div>
-                        </div>
-                        <p class="mt-2 text-sm text-gray-500">System will randomly delay between min and max seconds before each email.</p>
-                    </div>
+
 
                     <!-- Schedule -->
                     <div class="mb-6">

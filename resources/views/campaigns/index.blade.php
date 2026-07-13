@@ -69,10 +69,8 @@
                                         </div>
                                     </div>
 
-                                    <!-- Quick Stats -->
                                     <div class="mt-3 flex items-center space-x-6 text-sm text-gray-500">
                                         <span>📧 {{ $total }} recipients</span>
-                                        <span>⚡ {{ $campaign['emails_per_hour'] }}/hour</span>
                                         <span>✅ {{ $campaign['stats']['valid'] }} valid</span>
                                         <span>❌ {{ $campaign['stats']['invalid'] }} invalid</span>
                                     </div>

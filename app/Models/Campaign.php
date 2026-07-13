@@ -19,9 +19,6 @@ class Campaign extends Model
         'reply_to',
         'status',
         'pause_reason',
-        'emails_per_hour',
-        'min_delay_seconds',
-        'max_delay_seconds',
         'use_all_smtps',
         'scheduled_at',
         'started_at',
@@ -31,9 +28,6 @@ class Campaign extends Model
     ];
 
     protected $casts = [
-        'emails_per_hour' => 'integer',
-        'min_delay_seconds' => 'integer',
-        'max_delay_seconds' => 'integer',
         'use_all_smtps' => 'boolean',
         'scheduled_at' => 'datetime',
         'started_at' => 'datetime',
@@ -122,22 +116,6 @@ class Campaign extends Model
     public function getRandomBodyTemplate(): ?BodyTemplate
     {
         return $this->bodyTemplates()->inRandomOrder()->first();
-    }
-
-    /**
-     * Calculate random delay between min and max.
-     */
-    public function getRandomDelay(): int
-    {
-        return rand($this->min_delay_seconds, $this->max_delay_seconds);
-    }
-
-    /**
-     * Calculate batch size for sending (per minute).
-     */
-    public function getBatchSize(): int
-    {
-        return (int) ceil($this->emails_per_hour / 60);
     }
 
     /**

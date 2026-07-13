@@ -108,6 +108,9 @@
                 <a href="{{ route('campaigns.export', $campaign) }}" class="px-4 py-2 bg-green-100 text-green-700 rounded-md hover:bg-green-200 text-sm font-medium">
                     📥 Export CSV
                 </a>
+                <a href="{{ route('campaigns.report', $campaign) }}" target="_blank" class="px-4 py-2 bg-pink-100 text-pink-700 rounded-md hover:bg-pink-200 text-sm font-medium">
+                    📊 View Full Report
+                </a>
                 <form action="{{ route('campaigns.duplicate', $campaign) }}" method="POST" class="inline" onsubmit="return confirm('Duplicate this campaign as a new draft?')">
                     @csrf
                     <button type="submit" class="px-4 py-2 bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200 text-sm font-medium">
@@ -442,14 +445,6 @@
             <div class="mt-6 bg-white rounded-lg shadow-sm p-6">
                 <h3 class="text-lg font-semibold text-gray-900 mb-4">Campaign Settings</h3>
                 <dl class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div>
-                        <dt class="text-sm text-gray-500">Emails Per Hour</dt>
-                        <dd class="text-lg font-medium text-gray-900">{{ $campaign->emails_per_hour }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-sm text-gray-500">Delay Range</dt>
-                        <dd class="text-lg font-medium text-gray-900">{{ $campaign->min_delay_seconds }}s - {{ $campaign->max_delay_seconds }}s</dd>
-                    </div>
                     <div>
                         <dt class="text-sm text-gray-500">Scheduled At</dt>
                         <dd class="text-lg font-medium text-gray-900">{{ $campaign->scheduled_at?->format('M d, Y H:i') ?? 'Immediate' }}</dd>

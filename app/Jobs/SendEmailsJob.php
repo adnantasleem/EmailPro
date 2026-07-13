@@ -57,58 +57,71 @@ class SendEmailsJob implements ShouldQueue
      */
     public function handle(EmailSenderService $sender, SmtpSelectorService $smtpSelector): void
     {
-        // Check if any SMTP can send
-        if (!$smtpSelector->canSendAny()) {
-            Log::warning('SendEmailsJob: No SMTP accounts available to send');
-            return;
-        }
-
-        // Find campaigns in sending status that are ready
-        $campaigns = Campaign::status(Campaign::STATUS_SENDING)->get();
-
-        if ($campaigns->isEmpty()) {
-            Log::info('SendEmailsJob: No campaigns to send');
-            return;
-        }
-
-        foreach ($campaigns as $campaign) {
-            if (!$campaign->isReadyToSend()) {
-                Log::info("SendEmailsJob: Campaign {$campaign->id} not ready (scheduled for {$campaign->scheduled_at})");
+        // Run for 55 seconds to stay within the minute interval
+        $endTime = microtime(true) + 55;
+        
+        while (microtime(true) < $endTime) {
+            $sentAny = false;
+            
+            // Check if any SMTP can send
+            if (!$smtpSelector->canSendAny()) {
+                sleep(1);
                 continue;
             }
 
-            $this->sendCampaignEmails($campaign, $sender, $smtpSelector);
+            // Find campaigns in sending status that are ready
+            $campaigns = Campaign::status(Campaign::STATUS_SENDING)->get();
 
-            // Check if we've exhausted all SMTPs
-            if (!$smtpSelector->canSendAny()) {
-                Log::warning('SendEmailsJob: All SMTP accounts exhausted, stopping');
-                break;
+            if ($campaigns->isEmpty()) {
+                break; // No active campaigns, stop job
             }
-        }
-    }
 
-    /**
-     * Send emails for a specific campaign.
-     */
-    protected function sendCampaignEmails(
-        Campaign $campaign,
-        EmailSenderService $sender,
-        SmtpSelectorService $smtpSelector
-    ): void {
-        Log::info("SendEmailsJob: Processing campaign {$campaign->id} - {$campaign->name}");
+            foreach ($campaigns as $campaign) {
+                if (!$campaign->isReadyToSend()) {
+                    continue;
+                }
 
-        // Calculate batch size (emails per minute = emails_per_hour / 60)
-        $batchSize = $campaign->getBatchSize();
+                while ($smtpSelector->canSendAnyForCampaign($campaign)) {
+                    $recipient = $campaign->recipients()->readyToSend()->first();
+                    
+                    if (!$recipient) {
+                        // Mark campaign as completed if no recipients left
+                        $remainingUnsent = $campaign->recipients()
+                            ->whereIn('status', [
+                                \App\Models\Recipient::STATUS_VALID,
+                                \App\Models\Recipient::STATUS_PENDING,
+                                \App\Models\Recipient::STATUS_VALIDATING,
+                                \App\Models\Recipient::STATUS_FAILED,
+                            ])
+                            ->count();
+                            
+                        if ($remainingUnsent === 0) {
+                            $campaign->update([
+                                'status' => Campaign::STATUS_COMPLETED,
+                                'completed_at' => now(),
+                            ]);
+                            Log::info("SendEmailsJob: Campaign {$campaign->id} completed.");
+                        }
+                        break; // Move to next campaign
+                    }
 
-        // Send the batch
-        $results = $sender->sendBatch($campaign, $batchSize);
+                    // Send email (this puts SMTP on micro-cooldown)
+                    $result = $sender->sendEmail($campaign, $recipient);
+                    $sentAny = true;
+                    
+                    if (!$result['success']) {
+                        Log::error("SendEmailsJob: Failed to send to {$recipient->email}: {$result['error']}");
+                    }
 
-        Log::info("SendEmailsJob: Campaign {$campaign->id} - Sent: {$results['sent']}, Failed: {$results['failed']}");
+                    // Break early if we've reached our 55s limit
+                    if (microtime(true) >= $endTime) {
+                        break 3;
+                    }
+                }
+            }
 
-        // Log any failures for debugging
-        foreach ($results['details'] as $detail) {
-            if (!$detail['success']) {
-                Log::error("SendEmailsJob: Failed to send to {$detail['email']}: {$detail['error']}");
+            if (!$sentAny) {
+                sleep(1); // Rest for 1 second before checking cooldowns again
             }
         }
     }

@@ -25,7 +25,6 @@ class CampaignController extends Controller
                 'id' => $campaign->id,
                 'name' => $campaign->name,
                 'status' => $campaign->status,
-                'emails_per_hour' => $campaign->emails_per_hour,
                 'stats' => $campaign->stats,
                 'scheduled_at' => $campaign->scheduled_at?->format('M d, Y H:i'),
                 'started_at' => $campaign->started_at?->format('M d, Y H:i'),
@@ -81,9 +80,6 @@ class CampaignController extends Controller
             'name' => 'required|string|max:255',
             'from_name' => 'nullable|string|max:255',
             'reply_to' => 'nullable|email|max:255',
-            'emails_per_hour' => 'required|integer|min:1|max:10000',
-            'min_delay_seconds' => 'required|integer|min:0|max:300',
-            'max_delay_seconds' => 'required|integer|min:0|max:300|gte:min_delay_seconds',
             'use_all_smtps' => 'boolean',
             'smtp_configs' => 'nullable|array',
             'smtp_configs.*' => 'exists:smtp_configs,id',
@@ -149,9 +145,6 @@ class CampaignController extends Controller
             'from_name' => $validated['from_name'] ?? null,
             'reply_to' => $validated['reply_to'] ?? null,
             'status' => Campaign::STATUS_DRAFT,
-            'emails_per_hour' => $validated['emails_per_hour'],
-            'min_delay_seconds' => $validated['min_delay_seconds'],
-            'max_delay_seconds' => $validated['max_delay_seconds'],
             'use_all_smtps' => $useAllSmtps,
             'scheduled_at' => $validated['scheduled_at'] ?? null,
         ]);
@@ -270,6 +263,67 @@ class CampaignController extends Controller
     }
 
     /**
+     * Display a comprehensive, printable report for the specified campaign.
+     */
+    public function report(Campaign $campaign, ContentRotatorService $rotator)
+    {
+        // Ensure user owns this campaign
+        if ((int) $campaign->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $stats = $campaign->stats;
+
+        // Add opened count to stats
+        $stats['opened'] = $campaign->recipients()->whereNotNull('opened_at')->count();
+
+        $subjectStats = $rotator->getSubjectStats($campaign);
+        $bodyStats = $rotator->getBodyStats($campaign);
+
+        // Calculate duration if completed
+        $duration = null;
+        if ($campaign->started_at && $campaign->completed_at) {
+            $duration = $campaign->started_at->diffForHumans($campaign->completed_at, true);
+        }
+
+        // Get all failed recipients to aggregate errors
+        $failedRecipients = $campaign->recipients()
+            ->where('status', \App\Models\Recipient::STATUS_FAILED)
+            ->get();
+            
+        $errorCategories = [];
+        foreach ($failedRecipients as $r) {
+            $msg = $r->error_message ?? 'Unknown error';
+            if (str_contains($msg, 'timed out') || str_contains($msg, 'Connection timed out')) {
+                $cat = 'Connection Timeout';
+            } elseif (str_contains($msg, 'closed unexpectedly')) {
+                $cat = 'Connection Closed';
+            } elseif (str_contains($msg, 'Name or service not known') || str_contains($msg, 'getaddrinfo')) {
+                $cat = 'DNS Resolution Failed';
+            } elseif (str_contains($msg, 'sending limit') || str_contains($msg, 'quota') || str_contains($msg, '550')) {
+                $cat = 'Sending Limit / Quota';
+            } elseif (str_contains($msg, 'No available SMTP')) {
+                $cat = 'No SMTP Available';
+            } elseif (str_contains($msg, 'refused') || str_contains($msg, 'Could not establish')) {
+                $cat = 'Connection Refused';
+            } else {
+                $cat = 'Other Error';
+            }
+            $errorCategories[$cat] = ($errorCategories[$cat] ?? 0) + 1;
+        }
+        arsort($errorCategories);
+
+        return view('campaigns.report', compact(
+            'campaign',
+            'stats',
+            'subjectStats',
+            'bodyStats',
+            'duration',
+            'errorCategories'
+        ));
+    }
+
+    /**
      * Show the form for editing the specified campaign.
      */
     public function edit(Campaign $campaign)
@@ -346,9 +400,6 @@ class CampaignController extends Controller
             'name' => 'required|string|max:255',
             'from_name' => 'nullable|string|max:255',
             'reply_to' => 'nullable|email|max:255',
-            'emails_per_hour' => 'required|integer|min:1|max:10000',
-            'min_delay_seconds' => 'required|integer|min:0|max:300',
-            'max_delay_seconds' => 'required|integer|min:0|max:300|gte:min_delay_seconds',
             'use_all_smtps' => 'boolean',
             'smtp_configs' => 'nullable|array',
             'smtp_configs.*' => 'exists:smtp_configs,id',
@@ -379,9 +430,6 @@ class CampaignController extends Controller
             'name' => $validated['name'],
             'from_name' => $validated['from_name'] ?? null,
             'reply_to' => $validated['reply_to'] ?? null,
-            'emails_per_hour' => $validated['emails_per_hour'],
-            'min_delay_seconds' => $validated['min_delay_seconds'],
-            'max_delay_seconds' => $validated['max_delay_seconds'],
             'use_all_smtps' => $useAllSmtps,
             'scheduled_at' => $validated['scheduled_at'] ?? null,
         ]);

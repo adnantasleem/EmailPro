@@ -85,6 +85,36 @@
                         <x-input-error :messages="$errors->get('daily_limit')" class="mt-2" />
                     </div>
 
+                    <!-- Hourly Limit -->
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <x-input-label for="min_emails_per_hour" :value="__('Min Emails Per Hour')" />
+                            <x-text-input id="min_emails_per_hour" name="min_emails_per_hour" type="number" class="mt-1 block w-full" :value="old('min_emails_per_hour')" placeholder="e.g., 20" min="1" max="100000" />
+                            <x-input-error :messages="$errors->get('min_emails_per_hour')" class="mt-2" />
+                        </div>
+                        <div>
+                            <x-input-label for="max_emails_per_hour" :value="__('Max Emails Per Hour')" />
+                            <x-text-input id="max_emails_per_hour" name="max_emails_per_hour" type="number" class="mt-1 block w-full" :value="old('max_emails_per_hour')" placeholder="e.g., 50" min="1" max="100000" />
+                            <x-input-error :messages="$errors->get('max_emails_per_hour')" class="mt-2" />
+                        </div>
+                    </div>
+                    <p class="mb-4 text-sm text-gray-500">Optional: Randomize the number of emails sent per hour between min and max.</p>
+
+                    <!-- Active Time Window -->
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <x-input-label for="active_time_start" :value="__('Active Start Time')" />
+                            <x-text-input id="active_time_start" name="active_time_start" type="time" class="mt-1 block w-full" :value="old('active_time_start')" />
+                            <x-input-error :messages="$errors->get('active_time_start')" class="mt-2" />
+                        </div>
+                        <div>
+                            <x-input-label for="active_time_end" :value="__('Active End Time')" />
+                            <x-text-input id="active_time_end" name="active_time_end" type="time" class="mt-1 block w-full" :value="old('active_time_end')" />
+                            <x-input-error :messages="$errors->get('active_time_end')" class="mt-2" />
+                        </div>
+                    </div>
+                    <p class="mb-6 text-sm text-gray-500">Optional: Only send emails during this time window (e.g., 09:00 to 17:00). Leave blank to send 24/7.</p>
+
                     <!-- Active -->
                     <div class="mb-6">
                         <label class="flex items-center">
