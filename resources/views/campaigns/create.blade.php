@@ -226,28 +226,91 @@
                     </div>
 
                     <!-- SMTP Selection -->
-                    <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <div class="mb-6 p-4 bg-gray-50 rounded-lg"
+                         x-data="smtpSelector({{ json_encode($smtpConfigs ?? []) }}, {{ json_encode(old('smtp_configs', [])) }}, {{ old('use_all_smtps', true) ? 'true' : 'false' }})">
                         <h3 class="text-lg font-medium text-gray-900 mb-4">SMTP Configuration</h3>
+                        
                         <div class="mb-4">
                             <label class="inline-flex items-center">
-                                <input type="checkbox" name="use_all_smtps" id="use_all_smtps" value="1" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50" {{ old('use_all_smtps', true) ? 'checked' : '' }}>
+                                <input type="checkbox" name="use_all_smtps" id="use_all_smtps" value="1" x-model="useAllSmtps" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
                                 <span class="ml-2 text-sm text-gray-700">Use all my active SMTP accounts (Recommended)</span>
                             </label>
                         </div>
                         
-                        <div id="specific_smtps_container" class="{{ old('use_all_smtps', true) ? 'hidden' : '' }}">
+                        <div x-show="!useAllSmtps" x-cloak class="mt-4">
                             <x-input-label :value="__('Select Specific SMTP Accounts')" />
-                            @if(isset($smtpConfigs) && $smtpConfigs->count() > 0)
-                                <select name="smtp_configs[]" id="smtp_configs" multiple class="mt-1 block w-full">
-                                    @foreach($smtpConfigs as $smtp)
-                                        <option value="{{ $smtp->id }}" {{ in_array($smtp->id, old('smtp_configs', [])) ? 'selected' : '' }}>{{ $smtp->name }} ({{ $smtp->username }})</option>
-                                    @endforeach
-                                </select>
-                                <p class="mt-1 text-xs text-gray-500">Only the selected SMTP accounts will be used for this campaign.</p>
-                            @else
-                                <p class="text-gray-500 text-sm">No active SMTP accounts found.</p>
-                            @endif
+                            
+                            <!-- Trigger Button -->
+                            <button type="button" @click="isOpen = true" class="mt-1 w-full bg-white border border-gray-300 rounded-md shadow-sm pl-3 pr-10 py-2 text-left cursor-default focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm flex justify-between items-center">
+                                <span class="block truncate" x-text="selectedSmtpsCount > 0 ? selectedSmtpsCount + ' SMTPs selected' : 'Select SMTP accounts...'"></span>
+                                <span class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                                    <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 3a1 1 0 01.707.293l3 3a1 1 0 01-1.414 1.414L10 5.414 7.707 7.707a1 1 0 01-1.414-1.414l3-3A1 1 0 0110 3zm-3.707 9.293a1 1 0 011.414 0L10 14.586l2.293-2.293a1 1 0 011.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                                </span>
+                            </button>
+                            <p class="mt-1 text-xs text-gray-500">Only the selected SMTP accounts will be used for this campaign.</p>
                             <x-input-error :messages="$errors->get('smtp_configs')" class="mt-2" />
+
+                            <!-- Hidden Inputs -->
+                            <template x-for="smtp in smtps.filter(s => s.checked)" :key="smtp.id">
+                                <input type="hidden" name="smtp_configs[]" :value="smtp.id">
+                            </template>
+
+                            <!-- Modal -->
+                            <div x-show="isOpen" style="display: none;" class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                                <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+                                    <!-- Background backdrop -->
+                                    <div x-show="isOpen" @click="isOpen = false" x-transition.opacity class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
+                                    <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+                                    
+                                    <!-- Modal panel -->
+                                    <div x-show="isOpen" x-transition class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                                        <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                                            <div class="flex justify-between items-center mb-4">
+                                                <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">Select SMTP Accounts</h3>
+                                                <button @click="isOpen = false" type="button" class="text-gray-400 hover:text-gray-500">
+                                                    <span class="sr-only">Close</span>
+                                                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                </button>
+                                            </div>
+                                            
+                                            <!-- Search -->
+                                            <div class="mb-4 relative">
+                                                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                    <svg class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                                </div>
+                                                <input type="text" x-model="search" placeholder="Search by name or username..." class="pl-10 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md">
+                                            </div>
+
+                                            <!-- Controls -->
+                                            <div class="flex justify-between items-center mb-2 px-2">
+                                                <span class="text-sm text-gray-500" x-text="filteredSmtps.length + ' accounts found'"></span>
+                                                <button type="button" @click="toggleAll" class="text-sm text-indigo-600 hover:text-indigo-900 font-medium" x-text="allFilteredChecked ? 'Uncheck All' : 'Check All'"></button>
+                                            </div>
+
+                                            <!-- List -->
+                                            <div class="max-h-60 overflow-y-auto border border-gray-200 rounded-md">
+                                                <template x-for="smtp in filteredSmtps" :key="smtp.id">
+                                                    <label class="flex items-center px-4 py-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer last:border-b-0">
+                                                        <input type="checkbox" x-model="smtp.checked" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                                                        <div class="ml-3">
+                                                            <span class="block text-sm font-medium text-gray-700" x-text="smtp.name"></span>
+                                                            <span class="block text-xs text-gray-500" x-text="smtp.username"></span>
+                                                        </div>
+                                                    </label>
+                                                </template>
+                                                <div x-show="filteredSmtps.length === 0" class="px-4 py-8 text-center text-gray-500 text-sm">
+                                                    No SMTP accounts match your search.
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="bg-gray-50 px-4 py-3 sm:px-6 flex justify-end">
+                                            <button type="button" @click="isOpen = false" class="inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:text-sm">
+                                                Done
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -353,19 +416,6 @@
                 allowClear: true,
                 width: '100%'
             });
-            $('#smtp_configs').select2({
-                placeholder: 'Search and select specific SMTP accounts...',
-                allowClear: true,
-                width: '100%'
-            });
-
-            $('#use_all_smtps').on('change', function() {
-                if ($(this).is(':checked')) {
-                    $('#specific_smtps_container').addClass('hidden');
-                } else {
-                    $('#specific_smtps_container').removeClass('hidden');
-                }
-            });
 
             // Add Subject Line
             $('#addSubjectBtn').on('click', function() {
@@ -455,6 +505,37 @@
                     $(this).val($(this).summernote('code'));
                 });
             });
+        });
+
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('smtpSelector', (allSmtps, selectedIds, initUseAllSmtps) => ({
+                isOpen: false,
+                useAllSmtps: initUseAllSmtps,
+                search: '',
+                smtps: allSmtps.map(s => ({
+                    ...s,
+                    checked: selectedIds.includes(s.id.toString()) || selectedIds.includes(s.id)
+                })),
+                get filteredSmtps() {
+                    if (this.search === '') return this.smtps;
+                    const q = this.search.toLowerCase();
+                    return this.smtps.filter(s => 
+                        (s.name && s.name.toLowerCase().includes(q)) || 
+                        (s.username && s.username.toLowerCase().includes(q))
+                    );
+                },
+                get allFilteredChecked() {
+                    if (this.filteredSmtps.length === 0) return false;
+                    return this.filteredSmtps.every(s => s.checked);
+                },
+                get selectedSmtpsCount() {
+                    return this.smtps.filter(s => s.checked).length;
+                },
+                toggleAll() {
+                    const check = !this.allFilteredChecked;
+                    this.filteredSmtps.forEach(s => s.checked = check);
+                }
+            }));
         });
     </script>
 </x-app-layout>
