@@ -67,7 +67,9 @@ class CampaignController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('campaigns.create', compact('contactLists', 'subjectLines', 'bodyTemplates', 'subjectGroups', 'bodyGroups'));
+        $smtpConfigs = \App\Models\SmtpConfig::where('user_id', auth()->id())->active()->orderBy('name')->get();
+
+        return view('campaigns.create', compact('contactLists', 'subjectLines', 'bodyTemplates', 'subjectGroups', 'bodyGroups', 'smtpConfigs'));
     }
 
     /**
@@ -82,6 +84,9 @@ class CampaignController extends Controller
             'emails_per_hour' => 'required|integer|min:1|max:10000',
             'min_delay_seconds' => 'required|integer|min:0|max:300',
             'max_delay_seconds' => 'required|integer|min:0|max:300|gte:min_delay_seconds',
+            'use_all_smtps' => 'boolean',
+            'smtp_configs' => 'nullable|array',
+            'smtp_configs.*' => 'exists:smtp_configs,id',
             'scheduled_at' => 'nullable|date|after:now',
             'saved_subject_groups' => 'nullable|array',
             'saved_subject_groups.*' => 'exists:subject_groups,id',
@@ -135,6 +140,8 @@ class CampaignController extends Controller
             return redirect()->back()->withInput()->withErrors($errors);
         }
 
+        $useAllSmtps = $request->has('use_all_smtps');
+
         // Create campaign
         $campaign = Campaign::create([
             'user_id' => auth()->id(),
@@ -145,8 +152,13 @@ class CampaignController extends Controller
             'emails_per_hour' => $validated['emails_per_hour'],
             'min_delay_seconds' => $validated['min_delay_seconds'],
             'max_delay_seconds' => $validated['max_delay_seconds'],
+            'use_all_smtps' => $useAllSmtps,
             'scheduled_at' => $validated['scheduled_at'] ?? null,
         ]);
+
+        if (!$useAllSmtps && !empty($validated['smtp_configs'])) {
+            $campaign->smtpConfigs()->attach($validated['smtp_configs']);
+        }
 
         // Add saved subject lines (from groups + individual, deduplicated)
         if ($allSavedSubjectIds->isNotEmpty()) {
@@ -300,6 +312,9 @@ class CampaignController extends Controller
             ->orderBy('name')
             ->get();
 
+        $smtpConfigs = \App\Models\SmtpConfig::where('user_id', auth()->id())->active()->orderBy('name')->get();
+        $selectedSmtps = $campaign->smtpConfigs->pluck('id')->toArray();
+
         return view('campaigns.edit', compact(
             'campaign', 
             'subjectLines', 
@@ -309,7 +324,9 @@ class CampaignController extends Controller
             'subjectGroups',
             'bodyGroups',
             'contactLists', 
-            'selectedContactLists'
+            'selectedContactLists',
+            'smtpConfigs',
+            'selectedSmtps'
         ));
     }
 
@@ -330,6 +347,9 @@ class CampaignController extends Controller
             'emails_per_hour' => 'required|integer|min:1|max:10000',
             'min_delay_seconds' => 'required|integer|min:0|max:300',
             'max_delay_seconds' => 'required|integer|min:0|max:300|gte:min_delay_seconds',
+            'use_all_smtps' => 'boolean',
+            'smtp_configs' => 'nullable|array',
+            'smtp_configs.*' => 'exists:smtp_configs,id',
             'scheduled_at' => 'nullable|date',
             'saved_subject_groups' => 'nullable|array',
             'saved_subject_groups.*' => 'exists:subject_groups,id',
@@ -350,6 +370,8 @@ class CampaignController extends Controller
             'contact_lists.*' => 'exists:contact_lists,id',
         ]);
 
+        $useAllSmtps = $request->has('use_all_smtps');
+
         // Update campaign basic info
         $campaign->update([
             'name' => $validated['name'],
@@ -358,8 +380,15 @@ class CampaignController extends Controller
             'emails_per_hour' => $validated['emails_per_hour'],
             'min_delay_seconds' => $validated['min_delay_seconds'],
             'max_delay_seconds' => $validated['max_delay_seconds'],
+            'use_all_smtps' => $useAllSmtps,
             'scheduled_at' => $validated['scheduled_at'] ?? null,
         ]);
+        
+        if (!$useAllSmtps && !empty($validated['smtp_configs'])) {
+            $campaign->smtpConfigs()->sync($validated['smtp_configs']);
+        } else {
+            $campaign->smtpConfigs()->detach();
+        }
 
         // Resolve subject groups + individual subjects (deduplicated)
         $allSavedSubjectIds = collect($validated['saved_subjects'] ?? []);

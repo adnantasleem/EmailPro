@@ -22,6 +22,7 @@ class Campaign extends Model
         'emails_per_hour',
         'min_delay_seconds',
         'max_delay_seconds',
+        'use_all_smtps',
         'scheduled_at',
         'started_at',
         'completed_at',
@@ -33,6 +34,7 @@ class Campaign extends Model
         'emails_per_hour' => 'integer',
         'min_delay_seconds' => 'integer',
         'max_delay_seconds' => 'integer',
+        'use_all_smtps' => 'boolean',
         'scheduled_at' => 'datetime',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
@@ -94,6 +96,15 @@ class Campaign extends Model
     public function contactLists(): BelongsToMany
     {
         return $this->belongsToMany(ContactList::class, 'campaign_contact_list')
+            ->withTimestamps();
+    }
+
+    /**
+     * Get the specific SMTP configs assigned to this campaign.
+     */
+    public function smtpConfigs(): BelongsToMany
+    {
+        return $this->belongsToMany(SmtpConfig::class, 'campaign_smtp_config')
             ->withTimestamps();
     }
 

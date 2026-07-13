@@ -244,6 +244,32 @@
                         <x-input-error :messages="$errors->get('bodies')" class="mt-2" />
                     </div>
 
+                    <!-- SMTP Selection -->
+                    <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">SMTP Configuration</h3>
+                        <div class="mb-4">
+                            <label class="inline-flex items-center">
+                                <input type="checkbox" name="use_all_smtps" id="use_all_smtps" value="1" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50" {{ old('use_all_smtps', $campaign->use_all_smtps ?? true) ? 'checked' : '' }}>
+                                <span class="ml-2 text-sm text-gray-700">Use all my active SMTP accounts (Recommended)</span>
+                            </label>
+                        </div>
+                        
+                        <div id="specific_smtps_container" class="{{ old('use_all_smtps', $campaign->use_all_smtps ?? true) ? 'hidden' : '' }}">
+                            <x-input-label :value="__('Select Specific SMTP Accounts')" />
+                            @if(isset($smtpConfigs) && $smtpConfigs->count() > 0)
+                                <select name="smtp_configs[]" id="smtp_configs" multiple class="mt-1 block w-full">
+                                    @foreach($smtpConfigs as $smtp)
+                                        <option value="{{ $smtp->id }}" {{ in_array($smtp->id, old('smtp_configs', $selectedSmtps ?? [])) ? 'selected' : '' }}>{{ $smtp->name }} ({{ $smtp->username }})</option>
+                                    @endforeach
+                                </select>
+                                <p class="mt-1 text-xs text-gray-500">Only the selected SMTP accounts will be used for this campaign.</p>
+                            @else
+                                <p class="text-gray-500 text-sm">No active SMTP accounts found.</p>
+                            @endif
+                            <x-input-error :messages="$errors->get('smtp_configs')" class="mt-2" />
+                        </div>
+                    </div>
+
                     <!-- Contact Lists Selection -->
                     <div class="mb-6 p-4 bg-gray-50 rounded-lg">
                         <h3 class="text-lg font-medium text-gray-900 mb-4">Contact Lists</h3>
@@ -350,6 +376,19 @@
                 placeholder: 'Select saved body templates to add...',
                 allowClear: true,
                 width: '100%'
+            });
+            $('#smtp_configs').select2({
+                placeholder: 'Search and select specific SMTP accounts...',
+                allowClear: true,
+                width: '100%'
+            });
+
+            $('#use_all_smtps').on('change', function() {
+                if ($(this).is(':checked')) {
+                    $('#specific_smtps_container').addClass('hidden');
+                } else {
+                    $('#specific_smtps_container').removeClass('hidden');
+                }
             });
 
             // Add Subject Line

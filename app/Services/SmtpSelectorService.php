@@ -38,6 +38,47 @@ class SmtpSelectorService
     }
 
     /**
+     * Select a random active SMTP account that can still send,
+     * specifically allowed by the given Campaign.
+     */
+    public function selectSmtpForCampaign(\App\Models\Campaign $campaign): ?SmtpConfig
+    {
+        $query = SmtpConfig::active()->where('user_id', $campaign->user_id);
+
+        if (!$campaign->use_all_smtps) {
+            $allowedIds = $campaign->smtpConfigs()->pluck('smtp_configs.id')->toArray();
+            if (empty($allowedIds)) {
+                return null;
+            }
+            $query->whereIn('id', $allowedIds);
+        }
+
+        $smtps = $query->get();
+
+        if ($smtps->isEmpty()) {
+            return null;
+        }
+
+        $availableSmtps = $smtps->filter(function (SmtpConfig $smtp) {
+            return $smtp->canSend();
+        });
+
+        if ($availableSmtps->isEmpty()) {
+            return null;
+        }
+
+        return $availableSmtps->random();
+    }
+
+    /**
+     * Check if any allowed SMTP for the campaign can send.
+     */
+    public function canSendAnyForCampaign(\App\Models\Campaign $campaign): bool
+    {
+        return $this->selectSmtpForCampaign($campaign) !== null;
+    }
+
+    /**
      * Get all active SMTPs with their remaining capacity.
      */
     public function getAvailableSmtps(): Collection

@@ -51,8 +51,8 @@ class EmailSenderService
                 throw new Exception('Monthly email limit reached (' . $user->monthly_email_limit . ' emails). Limit resets on ' . now()->addMonth()->startOfMonth()->format('M 1, Y') . '.');
             }
 
-            // Select random SMTP from the campaign owner's SMTPs
-            $smtp = $this->smtpSelector->selectSmtp($campaign->user_id);
+            // Select random SMTP allowed for this campaign
+            $smtp = $this->smtpSelector->selectSmtpForCampaign($campaign);
             if (!$smtp) {
                 throw new Exception('No available SMTP accounts');
             }
@@ -251,7 +251,7 @@ class EmailSenderService
             ];
 
             // Check if we can still send (SMTP might have hit limit)
-            if (!$this->smtpSelector->canSendAny($campaign->user_id)) {
+            if (!$this->smtpSelector->canSendAnyForCampaign($campaign)) {
                 // If capacity is exhausted, auto-pause the campaign
                 $campaign->update([
                     'status' => Campaign::STATUS_PAUSED,
