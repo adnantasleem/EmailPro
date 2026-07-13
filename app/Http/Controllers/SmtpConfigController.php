@@ -74,7 +74,10 @@ class SmtpConfigController extends Controller
             'encryption' => ['required', Rule::in(['tls', 'ssl', 'none'])],
             'from_email' => 'required|email|max:255',
             'from_name' => 'required|string|max:255',
-            'daily_limit' => 'required|integer|min:1|max:100000',
+            'daily_limit' => 'nullable|integer|min:1|max:100000',
+            'pacing_strategy' => ['required', Rule::in(['per_hour', 'per_day'])],
+            'min_emails_per_day' => 'nullable|integer|min:1|max:100000',
+            'max_emails_per_day' => 'nullable|integer|min:1|max:100000|gte:min_emails_per_day',
             'min_emails_per_hour' => 'nullable|integer|min:1|max:100000',
             'max_emails_per_hour' => 'nullable|integer|min:1|max:100000|gte:min_emails_per_hour',
             'active_time_start' => 'nullable|date_format:H:i',
@@ -88,6 +91,14 @@ class SmtpConfigController extends Controller
         // Remove spaces from password (for App Passwords like "abcd efgh ijkl mnop")
         if (!empty($validated['password'])) {
             $validated['password'] = str_replace(' ', '', $validated['password']);
+        }
+
+        // Calculate initial limits if necessary
+        if ($validated['pacing_strategy'] === 'per_day' && !empty($validated['min_emails_per_day']) && !empty($validated['max_emails_per_day'])) {
+            $validated['current_daily_limit'] = rand($validated['min_emails_per_day'], $validated['max_emails_per_day']);
+            $validated['daily_limit'] = $validated['max_emails_per_day']; // Fallback hard limit
+        } elseif (empty($validated['daily_limit'])) {
+            $validated['daily_limit'] = 1000; // Safe default
         }
 
         SmtpConfig::create($validated);
@@ -127,7 +138,10 @@ class SmtpConfigController extends Controller
             'encryption' => ['required', Rule::in(['tls', 'ssl', 'none'])],
             'from_email' => 'required|email|max:255',
             'from_name' => 'required|string|max:255',
-            'daily_limit' => 'required|integer|min:1|max:100000',
+            'daily_limit' => 'nullable|integer|min:1|max:100000',
+            'pacing_strategy' => ['required', Rule::in(['per_hour', 'per_day'])],
+            'min_emails_per_day' => 'nullable|integer|min:1|max:100000',
+            'max_emails_per_day' => 'nullable|integer|min:1|max:100000|gte:min_emails_per_day',
             'min_emails_per_hour' => 'nullable|integer|min:1|max:100000',
             'max_emails_per_hour' => 'nullable|integer|min:1|max:100000|gte:min_emails_per_hour',
             'active_time_start' => 'nullable|date_format:H:i',
@@ -143,6 +157,20 @@ class SmtpConfigController extends Controller
         } else {
             // Remove spaces from password (for App Passwords)
             $validated['password'] = str_replace(' ', '', $validated['password']);
+        }
+
+        // Update current daily limit if switching strategies or min/max changed
+        if ($validated['pacing_strategy'] === 'per_day') {
+            if ($smtp->pacing_strategy !== 'per_day' || 
+                $smtp->min_emails_per_day != $validated['min_emails_per_day'] || 
+                $smtp->max_emails_per_day != $validated['max_emails_per_day']) {
+                $validated['current_daily_limit'] = rand($validated['min_emails_per_day'], $validated['max_emails_per_day']);
+            }
+            if (!empty($validated['max_emails_per_day'])) {
+                $validated['daily_limit'] = $validated['max_emails_per_day'];
+            }
+        } elseif (empty($validated['daily_limit'])) {
+            $validated['daily_limit'] = $smtp->daily_limit ?? 1000;
         }
 
         $smtp->update($validated);

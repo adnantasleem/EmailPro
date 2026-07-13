@@ -78,27 +78,62 @@
                         </div>
                     </div>
 
-                    <!-- Daily Limit -->
-                    <div class="mb-4">
-                        <x-input-label for="daily_limit" :value="__('Daily Sending Limit')" />
-                        <x-text-input id="daily_limit" name="daily_limit" type="number" class="mt-1 block w-full" :value="old('daily_limit', $smtp->daily_limit)" required min="1" max="100000" />
-                        <x-input-error :messages="$errors->get('daily_limit')" class="mt-2" />
-                    </div>
+                    <!-- Pacing Strategy & Limits -->
+                    <div class="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50" x-data="{ strategy: '{{ old('pacing_strategy', $smtp->pacing_strategy ?? 'per_hour') }}' }">
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Pacing Strategy</label>
+                            <div class="flex gap-4">
+                                <label class="inline-flex items-center">
+                                    <input type="radio" name="pacing_strategy" value="per_hour" x-model="strategy" class="text-indigo-600 focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-700">Per Hour Pacing</span>
+                                </label>
+                                <label class="inline-flex items-center">
+                                    <input type="radio" name="pacing_strategy" value="per_day" x-model="strategy" class="text-indigo-600 focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-700">Per Day Pacing (Randomized)</span>
+                                </label>
+                            </div>
+                        </div>
 
-                    <!-- Hourly Limit -->
-                    <div class="grid grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <x-input-label for="min_emails_per_hour" :value="__('Min Emails Per Hour')" />
-                            <x-text-input id="min_emails_per_hour" name="min_emails_per_hour" type="number" class="mt-1 block w-full" :value="old('min_emails_per_hour', $smtp->min_emails_per_hour)" placeholder="e.g., 20" min="1" max="100000" />
-                            <x-input-error :messages="$errors->get('min_emails_per_hour')" class="mt-2" />
+                        <!-- Per Hour Strategy -->
+                        <div x-show="strategy === 'per_hour'" x-cloak class="space-y-4">
+                            <div>
+                                <x-input-label for="daily_limit" :value="__('Hard Daily Limit')" />
+                                <x-text-input id="daily_limit" name="daily_limit" type="number" class="mt-1 block w-full" :value="old('daily_limit', $smtp->daily_limit)" min="1" max="100000" />
+                                <p class="mt-1 text-sm text-gray-500">Maximum total emails to send per day as a hard stop.</p>
+                                <x-input-error :messages="$errors->get('daily_limit')" class="mt-2" />
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <x-input-label for="min_emails_per_hour" :value="__('Min Emails Per Hour')" />
+                                    <x-text-input id="min_emails_per_hour" name="min_emails_per_hour" type="number" class="mt-1 block w-full" :value="old('min_emails_per_hour', $smtp->min_emails_per_hour)" placeholder="e.g., 20" min="1" max="100000" />
+                                    <x-input-error :messages="$errors->get('min_emails_per_hour')" class="mt-2" />
+                                </div>
+                                <div>
+                                    <x-input-label for="max_emails_per_hour" :value="__('Max Emails Per Hour')" />
+                                    <x-text-input id="max_emails_per_hour" name="max_emails_per_hour" type="number" class="mt-1 block w-full" :value="old('max_emails_per_hour', $smtp->max_emails_per_hour)" placeholder="e.g., 50" min="1" max="100000" />
+                                    <x-input-error :messages="$errors->get('max_emails_per_hour')" class="mt-2" />
+                                </div>
+                            </div>
+                            <p class="text-sm text-gray-500">The system will randomize hourly sends between min and max.</p>
                         </div>
-                        <div>
-                            <x-input-label for="max_emails_per_hour" :value="__('Max Emails Per Hour')" />
-                            <x-text-input id="max_emails_per_hour" name="max_emails_per_hour" type="number" class="mt-1 block w-full" :value="old('max_emails_per_hour', $smtp->max_emails_per_hour)" placeholder="e.g., 50" min="1" max="100000" />
-                            <x-input-error :messages="$errors->get('max_emails_per_hour')" class="mt-2" />
+
+                        <!-- Per Day Strategy -->
+                        <div x-show="strategy === 'per_day'" x-cloak class="space-y-4">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <x-input-label for="min_emails_per_day" :value="__('Min Emails Per Day')" />
+                                    <x-text-input id="min_emails_per_day" name="min_emails_per_day" type="number" class="mt-1 block w-full" :value="old('min_emails_per_day', $smtp->min_emails_per_day)" placeholder="e.g., 400" min="1" max="100000" />
+                                    <x-input-error :messages="$errors->get('min_emails_per_day')" class="mt-2" />
+                                </div>
+                                <div>
+                                    <x-input-label for="max_emails_per_day" :value="__('Max Emails Per Day')" />
+                                    <x-text-input id="max_emails_per_day" name="max_emails_per_day" type="number" class="mt-1 block w-full" :value="old('max_emails_per_day', $smtp->max_emails_per_day)" placeholder="e.g., 500" min="1" max="100000" />
+                                    <x-input-error :messages="$errors->get('max_emails_per_day')" class="mt-2" />
+                                </div>
+                            </div>
+                            <p class="text-sm text-gray-500">The system will pick a random daily limit between min and max every day, and automatically divide it by 24 hours to pace your sending evenly.</p>
                         </div>
                     </div>
-                    <p class="mb-4 text-sm text-gray-500">Optional: Randomize the number of emails sent per hour between min and max.</p>
 
                     <!-- Active Time Window -->
                     <div class="grid grid-cols-2 gap-4 mb-4">

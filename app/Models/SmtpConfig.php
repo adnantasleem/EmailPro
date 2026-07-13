@@ -40,6 +40,10 @@ class SmtpConfig extends Model
         'from_email',
         'from_name',
         'daily_limit',
+        'pacing_strategy',
+        'min_emails_per_day',
+        'max_emails_per_day',
+        'current_daily_limit',
         'min_emails_per_hour',
         'max_emails_per_hour',
         'current_hourly_limit',
@@ -69,6 +73,9 @@ class SmtpConfig extends Model
     protected $casts = [
         'port' => 'integer',
         'daily_limit' => 'integer',
+        'min_emails_per_day' => 'integer',
+        'max_emails_per_day' => 'integer',
+        'current_daily_limit' => 'integer',
         'min_emails_per_hour' => 'integer',
         'max_emails_per_hour' => 'integer',
         'current_hourly_limit' => 'integer',
@@ -140,6 +147,11 @@ class SmtpConfig extends Model
         if ($this->is_warming_up) {
             return $this->warmup_daily_limit;
         }
+        
+        if ($this->pacing_strategy === 'per_day' && $this->current_daily_limit) {
+            return $this->current_daily_limit;
+        }
+        
         return $this->daily_limit;
     }
 
@@ -190,8 +202,27 @@ class SmtpConfig extends Model
         // Calculate dynamic hourly limit for this hour if needed
         $startOfHour = now()->startOfHour();
         if (!$this->limit_calculated_at || $this->limit_calculated_at->lt($startOfHour)) {
-            $min = $this->min_emails_per_hour ?? max(1, (int) floor($dailyLimit / 24));
-            $max = $this->max_emails_per_hour ?? max(1, (int) ceil($dailyLimit / 24));
+            if ($this->pacing_strategy === 'per_day') {
+                // Determine active hours
+                $activeHours = 24;
+                if (!empty($this->active_time_start) && !empty($this->active_time_end)) {
+                    $start = \Carbon\Carbon::parse($this->active_time_start);
+                    $end = \Carbon\Carbon::parse($this->active_time_end);
+                    if ($start->gt($end)) {
+                        $activeHours = 24 - $start->diffInHours($end);
+                    } else {
+                        $activeHours = $end->diffInHours($start);
+                    }
+                    if ($activeHours <= 0) $activeHours = 24;
+                }
+                
+                $hourlyAvg = $dailyLimit / $activeHours;
+                $min = max(1, (int) floor($hourlyAvg));
+                $max = max(1, (int) ceil($hourlyAvg));
+            } else {
+                $min = $this->min_emails_per_hour ?? max(1, (int) floor($dailyLimit / 24));
+                $max = $this->max_emails_per_hour ?? max(1, (int) ceil($dailyLimit / 24));
+            }
             
             // Ensure min is <= max
             if ($min > $max) {
@@ -245,9 +276,17 @@ class SmtpConfig extends Model
     public function resetDailyCounterIfNeeded(): void
     {
         if ($this->last_reset_date === null || $this->last_reset_date->lt(today())) {
+            
+            // Roll new randomized daily limit if using per_day strategy
+            $newDailyLimit = null;
+            if ($this->pacing_strategy === 'per_day' && $this->min_emails_per_day && $this->max_emails_per_day) {
+                $newDailyLimit = rand($this->min_emails_per_day, $this->max_emails_per_day);
+            }
+
             $this->update([
                 'sent_today' => 0,
                 'last_reset_date' => today(),
+                'current_daily_limit' => $newDailyLimit ?? $this->current_daily_limit,
             ]);
             
             // Progress warmup if in warmup mode
