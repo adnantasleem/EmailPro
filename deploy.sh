@@ -15,6 +15,10 @@ git fetch --all
 git reset --hard origin/main
 git pull origin main
 
+# Clear bootstrap cache to prevent missing class errors when removing dev dependencies
+echo "🧹 Clearing bootstrap cache..."
+rm -f bootstrap/cache/*.php
+
 # 3. Install/Update PHP dependencies
 echo "📦 Installing PHP dependencies..."
 composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
