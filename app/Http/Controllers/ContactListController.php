@@ -385,30 +385,55 @@ class ContactListController extends Controller
         $filename = preg_replace('/[^a-zA-Z0-9_-]/', '_', $contactList->name) . $suffix . '.csv';
 
         return response()->streamDownload(function () use ($contactList, $status) {
+            // Prevent PHP script timeout
+            set_time_limit(0);
+            
             $handle = fopen('php://output', 'w');
 
-            // Collect unique custom field keys in a memory-efficient way
+            // Collect unique custom field keys efficiently
             $customFieldKeys = [];
             
-            // Query 1 for custom keys
-            $query1 = $contactList->contacts();
+            $query1 = \Illuminate\Support\Facades\DB::table('contacts')
+                ->where('contact_list_id', $contactList->id)
+                ->whereNotNull('custom_fields')
+                ->where('custom_fields', '!=', '[]')
+                ->where('custom_fields', '!=', '{}');
+                
             if ($status === 'valid') $query1->where('validation_status', Contact::STATUS_VALID);
             elseif ($status === 'invalid') $query1->where('validation_status', Contact::STATUS_INVALID);
             elseif ($status === 'pending') $query1->where('validation_status', Contact::STATUS_PENDING);
             elseif ($status === 'validating') $query1->where('validation_status', Contact::STATUS_VALIDATING);
-            $query1->orderBy('id');
             
-            $query1->chunk(1000, function ($contacts) use (&$customFieldKeys) {
+            try {
+                // Try using JSON_KEYS for maximum performance (MySQL/MariaDB)
+                $keysJson = $query1->selectRaw('DISTINCT JSON_KEYS(custom_fields) as keys_json')->pluck('keys_json');
+                foreach ($keysJson as $jsonStr) {
+                    if ($jsonStr) {
+                        $keys = json_decode($jsonStr, true);
+                        if (is_array($keys)) {
+                            foreach ($keys as $k) {
+                                if (!in_array($k, $customFieldKeys)) {
+                                    $customFieldKeys[] = $k;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                // Fallback for incompatible databases (just check first 1000 rows to be safe)
+                $fallbackQuery = clone $query1;
+                $contacts = $fallbackQuery->select('custom_fields')->limit(1000)->get();
                 foreach ($contacts as $contact) {
-                    if ($contact->custom_fields && is_array($contact->custom_fields)) {
-                        foreach (array_keys($contact->custom_fields) as $key) {
+                    $fields = json_decode($contact->custom_fields, true);
+                    if (is_array($fields)) {
+                        foreach (array_keys($fields) as $key) {
                             if (!in_array($key, $customFieldKeys)) {
                                 $customFieldKeys[] = $key;
                             }
                         }
                     }
                 }
-            });
+            }
 
             // Write CSV header
             $header = [
@@ -423,33 +448,42 @@ class ContactListController extends Controller
                 $header[] = $key;
             }
             fputcsv($handle, $header);
+            
+            // Flush immediately so Nginx/browser receives headers and prevents timeout
+            if (ob_get_level() > 0) ob_flush();
+            flush();
 
-            // Query 2 for actual data
-            $query2 = $contactList->contacts();
+            // Query 2 for actual data (Using DB::table for speed, avoiding Eloquent hydration)
+            $query2 = \Illuminate\Support\Facades\DB::table('contacts')->where('contact_list_id', $contactList->id);
             if ($status === 'valid') $query2->where('validation_status', Contact::STATUS_VALID);
             elseif ($status === 'invalid') $query2->where('validation_status', Contact::STATUS_INVALID);
             elseif ($status === 'pending') $query2->where('validation_status', Contact::STATUS_PENDING);
             elseif ($status === 'validating') $query2->where('validation_status', Contact::STATUS_VALIDATING);
             $query2->orderBy('id');
 
-            // Write data rows in chunks
-            $query2->chunk(1000, function ($contacts) use ($handle, $customFieldKeys) {
+            // Process in chunks, flush to keep connection alive
+            $query2->orderBy('id')->chunk(5000, function ($contacts) use ($handle, $customFieldKeys) {
                 foreach ($contacts as $contact) {
+                    $customFields = $contact->custom_fields ? json_decode($contact->custom_fields, true) : [];
                     $row = [
                         $contact->email,
                         $contact->name ?? '',
                         $contact->validation_status,
                         $contact->validation_error ?? '',
-                        $contact->created_at?->format('Y-m-d H:i:s') ?? '',
-                        $contact->validated_at?->format('Y-m-d H:i:s') ?? ''
+                        $contact->created_at ?? '',
+                        $contact->validated_at ?? ''
                     ];
 
                     foreach ($customFieldKeys as $key) {
-                        $row[] = $contact->custom_fields[$key] ?? '';
+                        $row[] = $customFields[$key] ?? '';
                     }
 
                     fputcsv($handle, $row);
                 }
+                
+                // Flush every chunk (5000 rows)
+                if (ob_get_level() > 0) ob_flush();
+                flush();
             });
 
             fclose($handle);
@@ -457,6 +491,7 @@ class ContactListController extends Controller
             'Content-Type' => 'text/csv',
             'Cache-Control' => 'no-cache, must-revalidate',
             'Expires' => '0',
+            'X-Accel-Buffering' => 'no', // Ask Nginx not to buffer the response
         ]);
     }
 
