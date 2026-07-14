@@ -914,7 +914,7 @@ class CampaignController extends Controller
             ]);
 
             // Write data rows in chunks
-            $campaign->recipients()->orderBy('email')->chunk(1000, function ($recipients) use ($handle) {
+            $campaign->recipients()->orderBy('id')->chunk(1000, function ($recipients) use ($handle) {
                 foreach ($recipients as $recipient) {
                     fputcsv($handle, [
                         $recipient->email,
