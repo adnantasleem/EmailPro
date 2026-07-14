@@ -384,13 +384,21 @@ class ContactListController extends Controller
         
         $filename = preg_replace('/[^a-zA-Z0-9_-]/', '_', $contactList->name) . $suffix . '.csv';
 
-        return response()->streamDownload(function () use ($query) {
+        return response()->streamDownload(function () use ($contactList, $status) {
             $handle = fopen('php://output', 'w');
 
             // Collect unique custom field keys in a memory-efficient way
             $customFieldKeys = [];
-            $queryClone = clone $query;
-            $queryClone->chunk(1000, function ($contacts) use (&$customFieldKeys) {
+            
+            // Query 1 for custom keys
+            $query1 = $contactList->contacts();
+            if ($status === 'valid') $query1->where('validation_status', Contact::STATUS_VALID);
+            elseif ($status === 'invalid') $query1->where('validation_status', Contact::STATUS_INVALID);
+            elseif ($status === 'pending') $query1->where('validation_status', Contact::STATUS_PENDING);
+            elseif ($status === 'validating') $query1->where('validation_status', Contact::STATUS_VALIDATING);
+            $query1->orderBy('id');
+            
+            $query1->chunk(1000, function ($contacts) use (&$customFieldKeys) {
                 foreach ($contacts as $contact) {
                     if ($contact->custom_fields && is_array($contact->custom_fields)) {
                         foreach (array_keys($contact->custom_fields) as $key) {
@@ -416,8 +424,16 @@ class ContactListController extends Controller
             }
             fputcsv($handle, $header);
 
+            // Query 2 for actual data
+            $query2 = $contactList->contacts();
+            if ($status === 'valid') $query2->where('validation_status', Contact::STATUS_VALID);
+            elseif ($status === 'invalid') $query2->where('validation_status', Contact::STATUS_INVALID);
+            elseif ($status === 'pending') $query2->where('validation_status', Contact::STATUS_PENDING);
+            elseif ($status === 'validating') $query2->where('validation_status', Contact::STATUS_VALIDATING);
+            $query2->orderBy('id');
+
             // Write data rows in chunks
-            $query->chunk(1000, function ($contacts) use ($handle, $customFieldKeys) {
+            $query2->chunk(1000, function ($contacts) use ($handle, $customFieldKeys) {
                 foreach ($contacts as $contact) {
                     $row = [
                         $contact->email,
