@@ -142,17 +142,17 @@ class SmtpConfig extends Model
     /**
      * Get the effective daily limit (considering warmup mode).
      */
-    public function getEffectiveLimit(): int
+    public function getEffectiveLimit(): ?int
     {
         if ($this->is_warming_up) {
-            return $this->warmup_daily_limit;
+            return (int) $this->warmup_daily_limit;
         }
         
         if ($this->pacing_strategy === 'per_day' && $this->current_daily_limit) {
-            return $this->current_daily_limit;
+            return (int) $this->current_daily_limit;
         }
         
-        return $this->daily_limit;
+        return $this->daily_limit ? (int) $this->daily_limit : null;
     }
 
     /**
@@ -195,7 +195,7 @@ class SmtpConfig extends Model
         }
 
         $dailyLimit = $this->getEffectiveLimit();
-        if ($this->sent_today >= $dailyLimit) {
+        if ($dailyLimit !== null && $this->sent_today >= $dailyLimit) {
             return false;
         }
 
@@ -216,12 +216,13 @@ class SmtpConfig extends Model
                     if ($activeHours <= 0) $activeHours = 24;
                 }
                 
-                $hourlyAvg = $dailyLimit / $activeHours;
+                $safeDailyLimit = $dailyLimit ?? 100; // fallback if somehow null on per_day
+                $hourlyAvg = $safeDailyLimit / $activeHours;
                 $min = max(1, (int) floor($hourlyAvg));
                 $max = max(1, (int) ceil($hourlyAvg));
             } else {
-                $min = $this->min_emails_per_hour ?? max(1, (int) floor($dailyLimit / 24));
-                $max = $this->max_emails_per_hour ?? max(1, (int) ceil($dailyLimit / 24));
+                $min = $this->min_emails_per_hour ?? ($dailyLimit ? max(1, (int) floor($dailyLimit / 24)) : 20);
+                $max = $this->max_emails_per_hour ?? ($dailyLimit ? max(1, (int) ceil($dailyLimit / 24)) : 20);
             }
             
             // Ensure min is <= max

@@ -97,8 +97,8 @@ class SmtpConfigController extends Controller
         if ($validated['pacing_strategy'] === 'per_day' && !empty($validated['min_emails_per_day']) && !empty($validated['max_emails_per_day'])) {
             $validated['current_daily_limit'] = rand($validated['min_emails_per_day'], $validated['max_emails_per_day']);
             $validated['daily_limit'] = $validated['max_emails_per_day']; // Fallback hard limit
-        } elseif (empty($validated['daily_limit'])) {
-            $validated['daily_limit'] = 1000; // Safe default
+        } elseif ($validated['pacing_strategy'] === 'per_hour' && empty($validated['daily_limit'])) {
+            $validated['daily_limit'] = null; // No hard limit for per_hour pacing
         }
 
         SmtpConfig::create($validated);
@@ -169,8 +169,8 @@ class SmtpConfigController extends Controller
             if (!empty($validated['max_emails_per_day'])) {
                 $validated['daily_limit'] = $validated['max_emails_per_day'];
             }
-        } elseif (empty($validated['daily_limit'])) {
-            $validated['daily_limit'] = $smtp->daily_limit ?? 1000;
+        } elseif ($validated['pacing_strategy'] === 'per_hour' && empty($validated['daily_limit'])) {
+            $validated['daily_limit'] = null; // No hard limit for per_hour pacing
         }
 
         $smtp->update($validated);
