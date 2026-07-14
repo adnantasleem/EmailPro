@@ -916,10 +916,17 @@ class CampaignController extends Controller
             // Write data rows in chunks
             $campaign->recipients()->orderBy('id')->chunk(1000, function ($recipients) use ($handle) {
                 foreach ($recipients as $recipient) {
+                    $status = $recipient->status;
+                    if ($status === \App\Models\Recipient::STATUS_SENT) {
+                        $status = 'delivered';
+                    } elseif ($status === \App\Models\Recipient::STATUS_FAILED) {
+                        $status = 'bounced';
+                    }
+                    
                     fputcsv($handle, [
                         $recipient->email,
                         $recipient->name ?? '',
-                        $recipient->status,
+                        $status,
                         $recipient->sent_at?->format('Y-m-d H:i:s') ?? '',
                         $recipient->opened_at?->format('Y-m-d H:i:s') ?? '',
                         $recipient->open_count,
