@@ -262,7 +262,7 @@
                                     <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
                                     
                                     <!-- Modal panel -->
-                                    <div x-show="isOpen" x-transition class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                                    <div x-show="isOpen" x-transition class="inline-block align-bottom bg-white rounded-xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
                                         <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                                             <div class="flex justify-between items-center mb-4">
                                                 <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">Select SMTP Accounts</h3>
@@ -287,7 +287,7 @@
                                             </div>
 
                                             <!-- List -->
-                                            <div class="max-h-60 overflow-y-auto border border-gray-200 rounded-md">
+                                            <div class="max-h-60 overflow-y-auto border border-gray-200 rounded-md custom-scrollbar pr-1">
                                                 <template x-for="smtp in filteredSmtps" :key="smtp.id">
                                                     <label class="flex items-center px-4 py-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer last:border-b-0">
                                                         <input type="checkbox" x-model="smtp.checked" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
@@ -547,5 +547,11 @@
             }));
         });
     </script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
 </x-app-layout>
 
