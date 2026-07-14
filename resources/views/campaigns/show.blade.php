@@ -502,129 +502,109 @@
             <div class="fixed inset-0 bg-gray-900 bg-opacity-75 backdrop-blur-sm transition-opacity" aria-hidden="true" onclick="document.getElementById('testEmailModal').classList.add('hidden')"></div>
             <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
             
-            <div class="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full">
+            <div class="inline-block align-bottom bg-white rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full">
                 <form action="{{ route('campaigns.test-email', $campaign) }}" method="POST">
                     @csrf
                     <input type="hidden" name="subject_id" x-model="selectedSubject">
                     <input type="hidden" name="body_id" x-model="selectedBody">
 
                     <!-- Header -->
-                    <div class="bg-indigo-600 px-6 py-4">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-bold text-white flex items-center gap-2" id="modal-title">
-                                <svg class="w-6 h-6 text-indigo-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                                Send Test Email
-                            </h3>
-                            <button type="button" onclick="document.getElementById('testEmailModal').classList.add('hidden')" class="text-indigo-200 hover:text-white transition-colors">
-                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                            </button>
+                    <div class="bg-white px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900" id="modal-title">Send Test Email</h3>
+                            <p class="mt-1 text-sm text-gray-500">Preview exactly how your campaign will look in a real inbox.</p>
                         </div>
-                        <p class="mt-1 text-indigo-100 text-sm">Preview exactly how your campaign will look in a real inbox.</p>
+                        <button type="button" onclick="document.getElementById('testEmailModal').classList.add('hidden')" class="text-gray-400 hover:text-gray-500 transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
                     </div>
 
-                    <div class="px-6 py-6 sm:flex sm:gap-8">
-                        
-                        <!-- Left Column: Settings -->
-                        <div class="sm:w-1/3 space-y-5 border-r border-gray-100 pr-6">
+                    <div class="px-6 py-5 space-y-6">
+                        <!-- Recipient Info -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                             <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-1">Send to Address</label>
-                                <div class="relative">
-                                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"></path></svg>
-                                    </div>
-                                    <input type="email" name="test_email" required class="pl-10 block w-full border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow">
-                                </div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Send to Address</label>
+                                <input type="email" name="test_email" required class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
                             </div>
                             
                             <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-1">SMTP Account</label>
-                                <select name="smtp_id" required class="block w-full border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-gray-50 hover:bg-white transition-colors">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">SMTP Account</label>
+                                <select name="smtp_id" required class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
                                     @foreach($smtpConfigs as $smtp)
                                         <option value="{{ $smtp->id }}" {{ $campaign->smtpConfigs->contains('id', $smtp->id) ? 'selected' : '' }}>{{ $smtp->name }}</option>
                                     @endforeach
                                 </select>
                             </div>
+                        </div>
 
-                            <div class="pt-4 border-t border-gray-100">
-                                <label class="block text-sm font-semibold text-gray-700 mb-3">Test Variables (Mock Data)</label>
-                                <div class="space-y-3">
-                                    <div>
-                                        <input type="text" name="first_name" placeholder="First Name (e.g. John)" class="block w-full border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                                    </div>
-                                    <div>
-                                        <input type="text" name="last_name" placeholder="Last Name (e.g. Doe)" class="block w-full border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                                    </div>
-                                </div>
+                        <!-- Variables -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">First Name (Mock Data)</label>
+                                <input type="text" name="first_name" placeholder="e.g. John" class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Last Name (Mock Data)</label>
+                                <input type="text" name="last_name" placeholder="e.g. Doe" class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
                             </div>
                         </div>
 
-                        <!-- Right Column: Content Selection -->
-                        <div class="sm:w-2/3 mt-6 sm:mt-0 space-y-6">
-                            
-                            <!-- Subject Lines -->
-                            <div>
-                                <h4 class="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3">1. Select Subject Line</h4>
-                                <div class="grid grid-cols-1 gap-3 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                                    @foreach($campaign->subjectLines as $subject)
-                                        <div @click="selectedSubject = '{{ $subject->id }}'" 
-                                             class="cursor-pointer border rounded-lg p-3 transition-all duration-200 hover:shadow-md"
-                                             :class="selectedSubject === '{{ $subject->id }}' ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' : 'border-gray-200 hover:border-indigo-300'">
-                                            <div class="flex items-start gap-3">
-                                                <div class="flex-shrink-0 mt-0.5">
-                                                    <div class="w-4 h-4 rounded-full border flex items-center justify-center" :class="selectedSubject === '{{ $subject->id }}' ? 'border-indigo-600' : 'border-gray-300'">
-                                                        <div class="w-2 h-2 rounded-full bg-indigo-600" x-show="selectedSubject === '{{ $subject->id }}'"></div>
+                        <!-- Content Selection -->
+                        <div class="border-t border-gray-100 pt-5">
+                            <h4 class="text-sm font-medium text-gray-900 mb-4">Email Content to Test</h4>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                                <!-- Subject -->
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Subject Line</label>
+                                    <div class="max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                                        @foreach($campaign->subjectLines as $subject)
+                                            <div @click="selectedSubject = '{{ $subject->id }}'" 
+                                                 class="cursor-pointer border rounded-md p-2.5 transition-all duration-150"
+                                                 :class="selectedSubject === '{{ $subject->id }}' ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' : 'border-gray-200 hover:border-indigo-300'">
+                                                <div class="flex items-center gap-2">
+                                                    <div class="w-3.5 h-3.5 rounded-full border flex-shrink-0 flex items-center justify-center" :class="selectedSubject === '{{ $subject->id }}' ? 'border-indigo-600' : 'border-gray-300'">
+                                                        <div class="w-1.5 h-1.5 rounded-full bg-indigo-600" x-show="selectedSubject === '{{ $subject->id }}'"></div>
                                                     </div>
+                                                    <span class="text-sm text-gray-800 line-clamp-2">{{ $subject->subject }}</span>
                                                 </div>
-                                                <span class="text-sm text-gray-800 font-medium">{{ $subject->subject }}</span>
                                             </div>
-                                        </div>
-                                    @endforeach
+                                        @endforeach
+                                    </div>
+                                </div>
+
+                                <!-- Body -->
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Body Template</label>
+                                    <div class="max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                                        @foreach($campaign->bodyTemplates as $index => $body)
+                                            <div @click="selectedBody = '{{ $body->id }}'" 
+                                                 class="cursor-pointer border rounded-md p-2.5 transition-all duration-150"
+                                                 :class="selectedBody === '{{ $body->id }}' ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' : 'border-gray-200 hover:border-indigo-300'">
+                                                <div class="flex items-center gap-2">
+                                                    <div class="w-3.5 h-3.5 rounded-full border flex-shrink-0 flex items-center justify-center" :class="selectedBody === '{{ $body->id }}' ? 'border-indigo-600' : 'border-gray-300'">
+                                                        <div class="w-1.5 h-1.5 rounded-full bg-indigo-600" x-show="selectedBody === '{{ $body->id }}'"></div>
+                                                    </div>
+                                                    <span class="text-sm font-medium text-gray-900">Template #{{ $index + 1 }}</span>
+                                                </div>
+                                                <div class="mt-1.5 ml-5 text-xs text-gray-500 line-clamp-1">
+                                                    {{ $body->plain_content ? Str::limit($body->plain_content, 50) : 'HTML Template' }}
+                                                </div>
+                                            </div>
+                                        @endforeach
+                                    </div>
                                 </div>
                             </div>
-
-                            <!-- Body Templates -->
-                            <div>
-                                <h4 class="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3">2. Select Body Template</h4>
-                                <div class="grid grid-cols-1 gap-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                                    @foreach($campaign->bodyTemplates as $index => $body)
-                                        <div @click="selectedBody = '{{ $body->id }}'" 
-                                             class="cursor-pointer border rounded-lg p-4 transition-all duration-200 hover:shadow-md flex flex-col h-full"
-                                             :class="selectedBody === '{{ $body->id }}' ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' : 'border-gray-200 hover:border-indigo-300'">
-                                            
-                                            <div class="flex items-center gap-3 mb-2">
-                                                <div class="flex-shrink-0">
-                                                    <div class="w-4 h-4 rounded-full border flex items-center justify-center" :class="selectedBody === '{{ $body->id }}' ? 'border-indigo-600' : 'border-gray-300'">
-                                                        <div class="w-2 h-2 rounded-full bg-indigo-600" x-show="selectedBody === '{{ $body->id }}'"></div>
-                                                    </div>
-                                                </div>
-                                                <span class="text-sm font-bold text-gray-900">Template #{{ $index + 1 }}</span>
-                                            </div>
-                                            
-                                            <!-- Preview iframe (sandboxed) -->
-                                            <div class="bg-white rounded border border-gray-100 p-3 h-24 overflow-hidden text-xs text-gray-600 relative">
-                                                <div class="absolute inset-0 bg-gradient-to-b from-transparent to-white/90 pointer-events-none"></div>
-                                                @if($body->html_content)
-                                                    <iframe srcdoc="{{ $body->html_content }}" class="w-full h-40 scale-75 origin-top-left pointer-events-none border-0 overflow-hidden"></iframe>
-                                                @else
-                                                    <div class="whitespace-pre-wrap font-mono">{{ Str::limit($body->plain_content, 150) }}</div>
-                                                @endif
-                                            </div>
-                                        </div>
-                                    @endforeach
-                                </div>
-                            </div>
-
                         </div>
                     </div>
 
                     <!-- Footer -->
-                    <div class="bg-gray-50 px-6 py-4 border-t border-gray-100 sm:flex sm:flex-row-reverse sm:gap-3 rounded-b-2xl">
-                        <button type="submit" class="w-full inline-flex justify-center items-center gap-2 rounded-lg border border-transparent shadow-sm px-6 py-2.5 bg-indigo-600 text-sm font-bold text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:w-auto transition-colors">
+                    <div class="bg-gray-50 px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 rounded-b-xl">
+                        <button type="button" onclick="document.getElementById('testEmailModal').classList.add('hidden')" class="px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                            Cancel
+                        </button>
+                        <button type="submit" class="px-4 py-2 bg-indigo-600 border border-transparent rounded-md shadow-sm text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
                             Send Test Email
-                        </button>
-                        <button type="button" onclick="document.getElementById('testEmailModal').classList.add('hidden')" class="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-6 py-2.5 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:w-auto transition-colors">
-                            Cancel
                         </button>
                     </div>
                 </form>
