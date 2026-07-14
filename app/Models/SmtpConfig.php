@@ -202,7 +202,7 @@ class SmtpConfig extends Model
         // Calculate dynamic hourly limit for this hour if needed
         $startOfHour = now()->startOfHour();
         if (!$this->limit_calculated_at || $this->limit_calculated_at->lt($startOfHour)) {
-            if ($this->pacing_strategy === 'per_day') {
+            if ($this->pacing_strategy === 'per_day' || $this->is_warming_up) {
                 // Determine active hours
                 $activeHours = 24;
                 if (!empty($this->active_time_start) && !empty($this->active_time_end)) {
