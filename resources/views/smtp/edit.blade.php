@@ -99,7 +99,7 @@
                             <div>
                                 <x-input-label for="daily_limit" :value="__('Hard Daily Limit')" />
                                 <x-text-input id="daily_limit" name="daily_limit" type="number" class="mt-1 block w-full" :value="old('daily_limit', $smtp->daily_limit)" min="1" max="100000" />
-                                <p class="mt-1 text-sm text-gray-500">Maximum total emails to send per day as a hard stop.</p>
+                                <p class="mt-1 text-sm text-gray-500">Maximum total emails to send per day as a hard stop. Leave blank if you don't want a hard limit.</p>
                                 <x-input-error :messages="$errors->get('daily_limit')" class="mt-2" />
                             </div>
                             <div class="grid grid-cols-2 gap-4">
