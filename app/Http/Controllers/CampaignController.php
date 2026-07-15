@@ -182,6 +182,7 @@ class CampaignController extends Controller
                     ->first();
                 if ($savedBody) {
                     $campaign->bodyTemplates()->create([
+                        'name' => $savedBody->name,
                         'html_content' => $savedBody->html_content,
                         'plain_content' => $savedBody->plain_content,
                     ]);
@@ -194,6 +195,7 @@ class CampaignController extends Controller
             foreach ($validated['bodies'] as $body) {
                 if (!empty(trim($body['html'] ?? ''))) {
                     $campaign->bodyTemplates()->create([
+                        'name' => 'Custom Template',
                         'html_content' => $body['html'],
                         'plain_content' => $body['plain'] ?? null,
                     ]);

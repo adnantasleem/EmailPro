@@ -62,12 +62,13 @@ class ContentRotatorService
     public function getBodyStats(Campaign $campaign): array
     {
         return $campaign->bodyTemplates()
-            ->select('id', 'usage_count')
+            ->select('id', 'name', 'usage_count', 'html_content')
             ->orderByDesc('usage_count')
             ->get()
             ->map(function ($template) {
                 return [
                     'id' => $template->id,
+                    'name' => $template->name,
                     'usage_count' => $template->usage_count,
                     'preview' => substr(strip_tags($template->html_content), 0, 100) . '...',
                 ];

@@ -212,7 +212,7 @@
                         @forelse($bodyStats as $index => $body)
                             <div class="p-4">
                                 <div class="flex justify-between items-start">
-                                    <p class="text-sm text-gray-600 flex-1 pr-4">Template #{{ $index + 1 }}: {{ $body['preview'] }}</p>
+                                    <p class="text-sm text-gray-600 flex-1 pr-4"><span class="font-semibold text-gray-900">{{ $body['name'] ?? 'Template #' . ($index + 1) }}</span>: {{ $body['preview'] }}</p>
                                     <span class="text-sm font-medium text-indigo-600">{{ $body['usage_count'] }} uses</span>
                                 </div>
                             </div>
@@ -584,7 +584,7 @@
                                                     <div class="w-3.5 h-3.5 rounded-full border flex-shrink-0 flex items-center justify-center" :class="selectedBody === '{{ $body->id }}' ? 'border-indigo-600' : 'border-gray-300'">
                                                         <div class="w-1.5 h-1.5 rounded-full bg-indigo-600" x-show="selectedBody === '{{ $body->id }}'"></div>
                                                     </div>
-                                                    <span class="text-sm font-medium text-gray-900">Template #{{ $index + 1 }}</span>
+                                                    <span class="text-sm font-medium text-gray-900">{{ $body->name ?? 'Template #' . ($index + 1) }}</span>
                                                 </div>
                                                 <div class="mt-1.5 ml-5 text-xs text-gray-500 line-clamp-1">
                                                     {{ $body->plain_content ? Str::limit($body->plain_content, 50) : 'HTML Template' }}
