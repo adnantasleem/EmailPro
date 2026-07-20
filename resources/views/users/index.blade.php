@@ -25,8 +25,8 @@
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Monthly Limit</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Limits</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
@@ -44,19 +44,40 @@
                                         <span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">User</span>
                                     @endif
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                <td class="px-6 py-4 whitespace-nowrap text-xs">
+                                    @if($user->daily_email_limit)
+                                        <div class="mb-1">D: {{ number_format($user->emails_sent_this_day) }}/{{ number_format($user->daily_email_limit) }}</div>
+                                    @endif
                                     @if($user->monthly_email_limit)
-                                        <span class="text-gray-700">{{ number_format($user->emails_sent_this_month) }} / {{ number_format($user->monthly_email_limit) }}</span>
-                                        @if($user->hasReachedEmailLimit())
-                                            <span class="ml-1 text-xs text-red-600 font-semibold">⛔ Limit reached</span>
-                                        @endif
-                                    @else
+                                        <div class="mb-1">M: {{ number_format($user->emails_sent_this_month) }}/{{ number_format($user->monthly_email_limit) }}</div>
+                                    @endif
+                                    @if($user->yearly_email_limit)
+                                        <div class="mb-1">Y: {{ number_format($user->emails_sent_this_year) }}/{{ number_format($user->yearly_email_limit) }}</div>
+                                    @endif
+                                    @if(!$user->daily_email_limit && !$user->monthly_email_limit && !$user->yearly_email_limit)
                                         <span class="text-gray-400">Unlimited</span>
                                     @endif
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ $user->created_at->format('M d, Y') }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                    @if($user->isAccountExpired())
+                                        <span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Expired</span>
+                                    @else
+                                        <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Active</span>
+                                        @if($user->expires_at)
+                                            <div class="text-xs text-gray-500 mt-1">Exp: {{ $user->expires_at->format('M d, Y') }}</div>
+                                        @endif
+                                    @endif
+                                </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                    <div class="flex justify-end space-x-3">
+                                    <div class="flex justify-end space-x-3 items-center">
+                                        @if(!$user->is_admin && $user->id !== auth()->id())
+                                            <form action="{{ route('admin.users.impersonate', $user) }}" method="POST" class="inline">
+                                                @csrf
+                                                <button type="submit" class="text-blue-600 hover:text-blue-900" title="Login as user">
+                                                    <svg class="w-5 h-5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                </button>
+                                            </form>
+                                        @endif
                                         <a href="{{ route('admin.users.edit', $user) }}" class="text-indigo-600 hover:text-indigo-900">Edit</a>
                                         @if($user->id !== auth()->id())
                                             <form action="{{ route('admin.users.destroy', $user) }}" method="POST" class="inline" onsubmit="return confirm('Delete this user?')">

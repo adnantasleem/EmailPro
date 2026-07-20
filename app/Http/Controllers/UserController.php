@@ -36,7 +36,10 @@ class UserController extends Controller
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
             'password' => ['required', 'confirmed', Password::defaults()],
             'is_admin' => ['boolean'],
+            'daily_email_limit' => ['nullable', 'integer', 'min:0'],
             'monthly_email_limit' => ['nullable', 'integer', 'min:0'],
+            'yearly_email_limit' => ['nullable', 'integer', 'min:0'],
+            'expires_at' => ['nullable', 'date'],
         ]);
 
         User::create([
@@ -44,7 +47,10 @@ class UserController extends Controller
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
             'is_admin' => $validated['is_admin'] ?? false,
+            'daily_email_limit' => $validated['daily_email_limit'] ?: null,
             'monthly_email_limit' => $validated['monthly_email_limit'] ?: null,
+            'yearly_email_limit' => $validated['yearly_email_limit'] ?: null,
+            'expires_at' => $validated['expires_at'] ?: null,
         ]);
 
         return redirect()->route('admin.users.index')
@@ -69,13 +75,19 @@ class UserController extends Controller
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email,' . $user->id],
             'password' => ['nullable', 'confirmed', Password::defaults()],
             'is_admin' => ['boolean'],
+            'daily_email_limit' => ['nullable', 'integer', 'min:0'],
             'monthly_email_limit' => ['nullable', 'integer', 'min:0'],
+            'yearly_email_limit' => ['nullable', 'integer', 'min:0'],
+            'expires_at' => ['nullable', 'date'],
         ]);
 
         $user->name = $validated['name'];
         $user->email = $validated['email'];
         $user->is_admin = $validated['is_admin'] ?? false;
+        $user->daily_email_limit = $validated['daily_email_limit'] ?: null;
         $user->monthly_email_limit = $validated['monthly_email_limit'] ?: null;
+        $user->yearly_email_limit = $validated['yearly_email_limit'] ?: null;
+        $user->expires_at = $validated['expires_at'] ?: null;
         
         if (!empty($validated['password'])) {
             $user->password = Hash::make($validated['password']);
@@ -100,5 +112,45 @@ class UserController extends Controller
 
         return redirect()->route('admin.users.index')
             ->with('success', 'User deleted successfully.');
+    }
+    
+    /**
+     * Impersonate a user.
+     */
+    public function impersonate(User $user)
+    {
+        if ($user->is_admin) {
+            return back()->with('error', 'You cannot impersonate an admin.');
+        }
+
+        if (auth()->id() === $user->id) {
+            return back()->with('error', 'You are already logged in as this user.');
+        }
+
+        session()->put('impersonated_by', auth()->id());
+        auth()->login($user);
+
+        return redirect()->route('dashboard')->with('success', "You are now impersonating {$user->name}.");
+    }
+
+    /**
+     * Leave impersonation.
+     */
+    public function leaveImpersonation()
+    {
+        if (!session()->has('impersonated_by')) {
+            return redirect()->route('dashboard');
+        }
+
+        $adminId = session()->pull('impersonated_by');
+        $admin = User::find($adminId);
+
+        if ($admin) {
+            auth()->login($admin);
+            return redirect()->route('admin.users.index')->with('success', 'You have returned to your admin account.');
+        }
+
+        auth()->logout();
+        return redirect()->route('login');
     }
 }

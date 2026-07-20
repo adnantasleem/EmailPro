@@ -113,6 +113,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::put('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
 
+    // Leave Impersonation
+    Route::post('/impersonate/leave', [\App\Http\Controllers\UserController::class, 'leaveImpersonation'])->name('impersonate.leave');
+
     // Admin: User Management
     Route::middleware([\App\Http\Middleware\AdminMiddleware::class])->prefix('admin')->name('admin.')->group(function () {
         Route::get('/users', [\App\Http\Controllers\UserController::class, 'index'])->name('users.index');
@@ -121,6 +124,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/users/{user}/edit', [\App\Http\Controllers\UserController::class, 'edit'])->name('users.edit');
         Route::put('/users/{user}', [\App\Http\Controllers\UserController::class, 'update'])->name('users.update');
         Route::delete('/users/{user}', [\App\Http\Controllers\UserController::class, 'destroy'])->name('users.destroy');
+        Route::post('/users/{user}/impersonate', [\App\Http\Controllers\UserController::class, 'impersonate'])->name('users.impersonate');
     });
 });
 

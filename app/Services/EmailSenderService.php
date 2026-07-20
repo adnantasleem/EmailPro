@@ -41,10 +41,20 @@ class EmailSenderService
         ];
 
         try {
-            // Check user's monthly email limit
+            // Check user's email limits and account expiration
             $user = $campaign->user;
-            if ($user && $user->hasReachedEmailLimit()) {
-                throw new Exception('Monthly email limit reached (' . $user->monthly_email_limit . ' emails). Limit resets on ' . now()->addMonth()->startOfMonth()->format('M 1, Y') . '.');
+            if ($user && !$user->canSendEmails(1)) {
+                if ($user->isAccountExpired()) {
+                    throw new Exception('Account has expired.');
+                } elseif ($user->hasReachedDailyEmailLimit()) {
+                    throw new Exception('Daily email limit reached (' . $user->daily_email_limit . ' emails). Limit resets tomorrow.');
+                } elseif ($user->hasReachedEmailLimit()) {
+                    throw new Exception('Monthly email limit reached (' . $user->monthly_email_limit . ' emails). Limit resets on ' . now()->addMonth()->startOfMonth()->format('M 1, Y') . '.');
+                } elseif ($user->hasReachedYearlyEmailLimit()) {
+                    throw new Exception('Yearly email limit reached (' . $user->yearly_email_limit . ' emails).');
+                } else {
+                    throw new Exception('Sending limit reached.');
+                }
             }
 
             // Select random SMTP allowed for this campaign

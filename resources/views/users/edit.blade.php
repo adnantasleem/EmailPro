@@ -51,7 +51,25 @@
                         </label>
                     </div>
 
-                    <div class="mb-6">
+                    <div class="mb-4">
+                        <label for="daily_email_limit" class="block text-sm font-medium text-gray-700">Daily Email Limit</label>
+                        <input type="number" name="daily_email_limit" id="daily_email_limit" 
+                            value="{{ old('daily_email_limit', $user->daily_email_limit) }}" min="0"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            placeholder="0 = Unlimited">
+                        <p class="text-xs text-gray-500 mt-1">Leave empty or set to 0 for unlimited emails.</p>
+                        @if($user->daily_email_limit)
+                            <p class="text-xs text-blue-600 mt-1">
+                                📊 Today: {{ number_format($user->emails_sent_this_day) }} / {{ number_format($user->daily_email_limit) }} emails sent
+                                ({{ number_format($user->remaining_daily_email_quota) }} remaining)
+                            </p>
+                        @endif
+                        @error('daily_email_limit')
+                            <p class="text-red-500 text-xs mt-1">{{ $message }}</p>
+                        @enderror
+                    </div>
+
+                    <div class="mb-4">
                         <label for="monthly_email_limit" class="block text-sm font-medium text-gray-700">Monthly Email Limit</label>
                         <input type="number" name="monthly_email_limit" id="monthly_email_limit" 
                             value="{{ old('monthly_email_limit', $user->monthly_email_limit) }}" min="0"
@@ -65,6 +83,40 @@
                             </p>
                         @endif
                         @error('monthly_email_limit')
+                            <p class="text-red-500 text-xs mt-1">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label for="yearly_email_limit" class="block text-sm font-medium text-gray-700">Yearly Email Limit</label>
+                        <input type="number" name="yearly_email_limit" id="yearly_email_limit" 
+                            value="{{ old('yearly_email_limit', $user->yearly_email_limit) }}" min="0"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            placeholder="0 = Unlimited">
+                        <p class="text-xs text-gray-500 mt-1">Leave empty or set to 0 for unlimited emails.</p>
+                        @if($user->yearly_email_limit)
+                            <p class="text-xs text-blue-600 mt-1">
+                                📊 This year: {{ number_format($user->emails_sent_this_year) }} / {{ number_format($user->yearly_email_limit) }} emails sent
+                                ({{ number_format($user->remaining_yearly_email_quota) }} remaining)
+                            </p>
+                        @endif
+                        @error('yearly_email_limit')
+                            <p class="text-red-500 text-xs mt-1">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    
+                    <div class="mb-6">
+                        <label for="expires_at" class="block text-sm font-medium text-gray-700">Account Expiration Date</label>
+                        <input type="datetime-local" name="expires_at" id="expires_at" 
+                            value="{{ old('expires_at', $user->expires_at ? $user->expires_at->format('Y-m-d\TH:i') : '') }}"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                        <p class="text-xs text-gray-500 mt-1">Optional. The user's account will be blocked and they won't be able to log in or send campaigns after this date.</p>
+                        @if($user->expires_at)
+                            <p class="text-xs {{ $user->isAccountExpired() ? 'text-red-600 font-bold' : 'text-blue-600' }} mt-1">
+                                🕒 Status: {{ $user->isAccountExpired() ? 'Expired' : 'Active (expires in ' . $user->expires_at->diffForHumans() . ')' }}
+                            </p>
+                        @endif
+                        @error('expires_at')
                             <p class="text-red-500 text-xs mt-1">{{ $message }}</p>
                         @enderror
                     </div>

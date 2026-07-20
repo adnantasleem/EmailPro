@@ -50,13 +50,45 @@
                         </label>
                     </div>
 
-                    <div class="mb-6">
+                    <div class="mb-4">
+                        <label for="daily_email_limit" class="block text-sm font-medium text-gray-700">Daily Email Limit</label>
+                        <input type="number" name="daily_email_limit" id="daily_email_limit" value="{{ old('daily_email_limit') }}" min="0"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            placeholder="0 = Unlimited">
+                        <p class="text-xs text-gray-500 mt-1">Leave empty or set to 0 for unlimited emails.</p>
+                        @error('daily_email_limit')
+                            <p class="text-red-500 text-xs mt-1">{{ $message }}</p>
+                        @enderror
+                    </div>
+
+                    <div class="mb-4">
                         <label for="monthly_email_limit" class="block text-sm font-medium text-gray-700">Monthly Email Limit</label>
                         <input type="number" name="monthly_email_limit" id="monthly_email_limit" value="{{ old('monthly_email_limit') }}" min="0"
                             class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                             placeholder="0 = Unlimited">
                         <p class="text-xs text-gray-500 mt-1">Leave empty or set to 0 for unlimited emails. Limit resets on the 1st of each month.</p>
                         @error('monthly_email_limit')
+                            <p class="text-red-500 text-xs mt-1">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label for="yearly_email_limit" class="block text-sm font-medium text-gray-700">Yearly Email Limit</label>
+                        <input type="number" name="yearly_email_limit" id="yearly_email_limit" value="{{ old('yearly_email_limit') }}" min="0"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            placeholder="0 = Unlimited">
+                        <p class="text-xs text-gray-500 mt-1">Leave empty or set to 0 for unlimited emails.</p>
+                        @error('yearly_email_limit')
+                            <p class="text-red-500 text-xs mt-1">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    
+                    <div class="mb-6">
+                        <label for="expires_at" class="block text-sm font-medium text-gray-700">Account Expiration Date</label>
+                        <input type="datetime-local" name="expires_at" id="expires_at" value="{{ old('expires_at') }}"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                        <p class="text-xs text-gray-500 mt-1">Optional. The user's account will be blocked and they won't be able to log in or send campaigns after this date.</p>
+                        @error('expires_at')
                             <p class="text-red-500 text-xs mt-1">{{ $message }}</p>
                         @enderror
                     </div>

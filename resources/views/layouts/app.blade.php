@@ -16,6 +16,17 @@
     </head>
     <body class="font-sans antialiased">
         <div class="min-h-screen bg-gray-100">
+            @if(session()->has('impersonated_by'))
+                <div class="bg-red-600 text-white px-4 py-2 text-center text-sm font-bold flex justify-center items-center">
+                    <span>You are currently impersonating {{ auth()->user()->name }}.</span>
+                    <form method="POST" action="{{ route('impersonate.leave') }}" class="ml-4 inline">
+                        @csrf
+                        <button type="submit" class="bg-white text-red-600 hover:bg-gray-100 px-3 py-1 rounded text-xs">
+                            Leave Impersonation
+                        </button>
+                    </form>
+                </div>
+            @endif
             @include('layouts.navigation')
 
             <!-- Page Heading -->

@@ -22,7 +22,10 @@ class User extends Authenticatable
         'email',
         'password',
         'is_admin',
+        'daily_email_limit',
         'monthly_email_limit',
+        'yearly_email_limit',
+        'expires_at',
     ];
 
     /**
@@ -45,7 +48,10 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'daily_email_limit' => 'integer',
             'monthly_email_limit' => 'integer',
+            'yearly_email_limit' => 'integer',
+            'expires_at' => 'datetime',
         ];
     }
 
@@ -55,6 +61,30 @@ class User extends Authenticatable
     public function campaigns(): HasMany
     {
         return $this->hasMany(Campaign::class);
+    }
+    
+    /**
+     * Check if user account is expired.
+     */
+    public function isAccountExpired(): bool
+    {
+        if (!$this->expires_at) {
+            return false;
+        }
+        return now()->greaterThan($this->expires_at);
+    }
+
+    /**
+     * Get count of emails sent today by this user.
+     */
+    public function getEmailsSentThisDayAttribute(): int
+    {
+        return EmailLog::whereHas('campaign', function ($query) {
+            $query->where('user_id', $this->id);
+        })
+        ->where('status', EmailLog::STATUS_SENT)
+        ->where('sent_at', '>=', now()->startOfDay())
+        ->count();
     }
 
     /**
@@ -69,9 +99,35 @@ class User extends Authenticatable
         ->where('sent_at', '>=', now()->startOfMonth())
         ->count();
     }
+    
+    /**
+     * Get count of emails sent this year by this user.
+     */
+    public function getEmailsSentThisYearAttribute(): int
+    {
+        return EmailLog::whereHas('campaign', function ($query) {
+            $query->where('user_id', $this->id);
+        })
+        ->where('status', EmailLog::STATUS_SENT)
+        ->where('sent_at', '>=', now()->startOfYear())
+        ->count();
+    }
 
     /**
-     * Get remaining email quota for this month.
+     * Get remaining daily email quota.
+     */
+    public function getRemainingDailyEmailQuotaAttribute(): ?int
+    {
+        if (!$this->daily_email_limit || $this->daily_email_limit <= 0) {
+            return null; // Unlimited
+        }
+        
+        $remaining = $this->daily_email_limit - $this->emails_sent_this_day;
+        return max(0, $remaining);
+    }
+
+    /**
+     * Get remaining monthly email quota.
      */
     public function getRemainingEmailQuotaAttribute(): ?int
     {
@@ -82,6 +138,30 @@ class User extends Authenticatable
         $remaining = $this->monthly_email_limit - $this->emails_sent_this_month;
         return max(0, $remaining);
     }
+    
+    /**
+     * Get remaining yearly email quota.
+     */
+    public function getRemainingYearlyEmailQuotaAttribute(): ?int
+    {
+        if (!$this->yearly_email_limit || $this->yearly_email_limit <= 0) {
+            return null; // Unlimited
+        }
+        
+        $remaining = $this->yearly_email_limit - $this->emails_sent_this_year;
+        return max(0, $remaining);
+    }
+
+    /**
+     * Check if user has reached their daily email limit.
+     */
+    public function hasReachedDailyEmailLimit(): bool
+    {
+        if (!$this->daily_email_limit || $this->daily_email_limit <= 0) {
+            return false;
+        }
+        return $this->emails_sent_this_day >= $this->daily_email_limit;
+    }
 
     /**
      * Check if user has reached their monthly email limit.
@@ -89,10 +169,20 @@ class User extends Authenticatable
     public function hasReachedEmailLimit(): bool
     {
         if (!$this->monthly_email_limit || $this->monthly_email_limit <= 0) {
-            return false; // Unlimited
+            return false;
         }
-        
         return $this->emails_sent_this_month >= $this->monthly_email_limit;
+    }
+    
+    /**
+     * Check if user has reached their yearly email limit.
+     */
+    public function hasReachedYearlyEmailLimit(): bool
+    {
+        if (!$this->yearly_email_limit || $this->yearly_email_limit <= 0) {
+            return false;
+        }
+        return $this->emails_sent_this_year >= $this->yearly_email_limit;
     }
 
     /**
@@ -100,10 +190,28 @@ class User extends Authenticatable
      */
     public function canSendEmails(int $count = 1): bool
     {
-        if (!$this->monthly_email_limit || $this->monthly_email_limit <= 0) {
-            return true; // Unlimited
+        if ($this->isAccountExpired()) {
+            return false;
+        }
+
+        if ($this->daily_email_limit && $this->daily_email_limit > 0) {
+            if (($this->emails_sent_this_day + $count) > $this->daily_email_limit) {
+                return false;
+            }
+        }
+
+        if ($this->monthly_email_limit && $this->monthly_email_limit > 0) {
+            if (($this->emails_sent_this_month + $count) > $this->monthly_email_limit) {
+                return false;
+            }
         }
         
-        return ($this->emails_sent_this_month + $count) <= $this->monthly_email_limit;
+        if ($this->yearly_email_limit && $this->yearly_email_limit > 0) {
+            if (($this->emails_sent_this_year + $count) > $this->yearly_email_limit) {
+                return false;
+            }
+        }
+        
+        return true;
     }
 }
