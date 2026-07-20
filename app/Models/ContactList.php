@@ -271,15 +271,25 @@ class ContactList extends Model
     public function saveStagedContacts(array $validEmails): int
     {
         $imported = 0;
-        foreach ($validEmails as $contact) {
-            $this->contacts()->create([
-                'email' => $contact['email'],
-                'name' => $contact['name'] ?? null,
-                'custom_fields' => !empty($contact['custom_fields']) ? $contact['custom_fields'] : null,
-                'is_active' => true,
-                'validation_status' => Contact::STATUS_PENDING,
-            ]);
-            $imported++;
+        $now = now()->toDateTimeString();
+        $chunks = array_chunk($validEmails, 1000);
+
+        foreach ($chunks as $chunk) {
+            $insertData = [];
+            foreach ($chunk as $contact) {
+                $insertData[] = [
+                    'contact_list_id' => $this->id,
+                    'email' => $contact['email'],
+                    'name' => $contact['name'] ?? null,
+                    'custom_fields' => !empty($contact['custom_fields']) ? json_encode($contact['custom_fields']) : null,
+                    'is_active' => 1,
+                    'validation_status' => Contact::STATUS_PENDING,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            }
+            \Illuminate\Support\Facades\DB::table('contacts')->insertOrIgnore($insertData);
+            $imported += count($insertData);
         }
 
         $this->updateContactsCount();

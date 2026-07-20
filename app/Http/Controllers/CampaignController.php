@@ -902,6 +902,9 @@ class CampaignController extends Controller
         $filename = "campaign_{$campaign->id}_export.csv";
 
         return response()->streamDownload(function () use ($campaign) {
+            // Prevent PHP script timeout
+            set_time_limit(0);
+
             $handle = fopen('php://output', 'w');
 
             // Write CSV header
@@ -915,31 +918,45 @@ class CampaignController extends Controller
                 'error_message'
             ]);
 
-            // Write data rows in chunks
-            $campaign->recipients()->orderBy('id')->chunk(1000, function ($recipients) use ($handle) {
-                foreach ($recipients as $recipient) {
-                    $status = $recipient->status;
-                    if ($status === \App\Models\Recipient::STATUS_SENT) {
-                        $status = 'delivered';
-                    } elseif ($status === \App\Models\Recipient::STATUS_FAILED) {
-                        $status = 'bounced';
+            // Flush immediately so Nginx/browser receives headers and prevents timeout
+            if (ob_get_level() > 0) ob_flush();
+            flush();
+
+            // Write data rows in chunks using DB for faster performance
+            \Illuminate\Support\Facades\DB::table('recipients')
+                ->where('campaign_id', $campaign->id)
+                ->orderBy('id')
+                ->chunk(5000, function ($recipients) use ($handle) {
+                    foreach ($recipients as $recipient) {
+                        $status = $recipient->status;
+                        if ($status === \App\Models\Recipient::STATUS_SENT) {
+                            $status = 'delivered';
+                        } elseif ($status === \App\Models\Recipient::STATUS_FAILED) {
+                            $status = 'bounced';
+                        }
+                        
+                        fputcsv($handle, [
+                            $recipient->email,
+                            $recipient->name ?? '',
+                            $status,
+                            $recipient->sent_at ?? '',
+                            $recipient->opened_at ?? '',
+                            $recipient->open_count,
+                            $recipient->error_message ?? ''
+                        ]);
                     }
-                    
-                    fputcsv($handle, [
-                        $recipient->email,
-                        $recipient->name ?? '',
-                        $status,
-                        $recipient->sent_at?->format('Y-m-d H:i:s') ?? '',
-                        $recipient->opened_at?->format('Y-m-d H:i:s') ?? '',
-                        $recipient->open_count,
-                        $recipient->error_message ?? ''
-                    ]);
-                }
-            });
+
+                    // Flush every chunk (5000 rows)
+                    if (ob_get_level() > 0) ob_flush();
+                    flush();
+                });
 
             fclose($handle);
         }, $filename, [
             'Content-Type' => 'text/csv',
+            'Cache-Control' => 'no-cache, must-revalidate',
+            'Expires' => '0',
+            'X-Accel-Buffering' => 'no',
         ]);
     }
 
