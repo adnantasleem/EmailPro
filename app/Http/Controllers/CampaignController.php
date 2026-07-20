@@ -622,7 +622,7 @@ class CampaignController extends Controller
      */
     public function sendTestEmail(Request $request, Campaign $campaign, \App\Services\EmailSenderService $emailSender)
     {
-        if ($campaign->user_id !== auth()->id()) {
+        if ((int) $campaign->user_id !== auth()->id()) {
             abort(403);
         }
 
