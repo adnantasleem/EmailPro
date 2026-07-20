@@ -929,8 +929,6 @@ class CampaignController extends Controller
                         $status = $recipient->status;
                         if ($status === \App\Models\Recipient::STATUS_SENT) {
                             $status = 'delivered';
-                        } elseif ($status === \App\Models\Recipient::STATUS_FAILED) {
-                            $status = 'bounced';
                         }
                         
                         fputcsv($handle, [
