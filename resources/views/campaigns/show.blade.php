@@ -496,14 +496,69 @@
     <!-- Test Email Modal -->
     <div id="testEmailModal" class="hidden fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true" x-data="{ 
         selectedSubject: '{{ $campaign->subjectLines->first()?->id ?? '' }}',
-        selectedBody: '{{ $campaign->bodyTemplates->first()?->id ?? '' }}'
+        selectedBody: '{{ $campaign->bodyTemplates->first()?->id ?? '' }}',
+        isLoading: false,
+        message: '',
+        isError: false,
+        openSmtp: false,
+        searchSmtp: '',
+        selectedSmtp: '{{ $campaign->smtpConfigs->first()?->id ?? '' }}',
+        smtps: [
+            @foreach($smtpConfigs as $smtp)
+            { id: '{{ $smtp->id }}', name: '{{ addslashes($smtp->name) }}' },
+            @endforeach
+        ],
+        get filteredSmtps() {
+            if (this.searchSmtp === '') return this.smtps;
+            return this.smtps.filter(s => s.name.toLowerCase().includes(this.searchSmtp.toLowerCase()));
+        },
+        get selectedSmtpName() {
+            let selected = this.smtps.find(s => s.id == this.selectedSmtp);
+            return selected ? selected.name : 'Select SMTP...';
+        },
+        submitTestEmail(e) {
+            this.isLoading = true;
+            this.message = '';
+            
+            let formData = new FormData(e.target);
+            formData.set('smtp_id', this.selectedSmtp);
+            
+            fetch(e.target.action, {
+                method: 'POST',
+                body: formData,
+                headers: { 
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(res => res.json().then(data => ({status: res.status, body: data})))
+            .then(res => {
+                this.isLoading = false;
+                if (res.status === 200 && res.body.success) {
+                    this.message = res.body.message;
+                    this.isError = false;
+                    setTimeout(() => {
+                        document.getElementById('testEmailModal').classList.add('hidden');
+                        this.message = '';
+                    }, 2000);
+                } else {
+                    this.message = res.body.message || 'Failed to send test email.';
+                    this.isError = true;
+                }
+            })
+            .catch(err => {
+                this.isLoading = false;
+                this.message = 'An error occurred while sending.';
+                this.isError = true;
+            });
+        }
     }">
         <div class="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
             <div class="fixed inset-0 bg-gray-900 bg-opacity-75 backdrop-blur-sm transition-opacity" aria-hidden="true" onclick="document.getElementById('testEmailModal').classList.add('hidden')"></div>
             <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
             
             <div class="inline-block align-bottom bg-white rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full">
-                <form action="{{ route('campaigns.test-email', $campaign) }}" method="POST">
+                <form action="{{ route('campaigns.test-email', $campaign) }}" method="POST" @submit.prevent="submitTestEmail">
                     @csrf
                     <input type="hidden" name="subject_id" x-model="selectedSubject">
                     <input type="hidden" name="body_id" x-model="selectedBody">
@@ -519,6 +574,15 @@
                         </button>
                     </div>
 
+                    <!-- Alert Message -->
+                    <div x-show="message" x-transition class="px-6 pt-4">
+                        <div :class="isError ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'" class="p-3 rounded-md border text-sm flex items-center gap-2">
+                            <svg x-show="!isError" class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                            <svg x-show="isError" class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            <span x-text="message"></span>
+                        </div>
+                    </div>
+
                     <div class="px-6 py-5 space-y-6">
                         <!-- Recipient Info -->
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -527,13 +591,33 @@
                                 <input type="email" name="test_email" required class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
                             </div>
                             
-                            <div>
+                            <div class="relative">
                                 <label class="block text-sm font-medium text-gray-700 mb-1">SMTP Account</label>
-                                <select name="smtp_id" required class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                                    @foreach($smtpConfigs as $smtp)
-                                        <option value="{{ $smtp->id }}" {{ $campaign->smtpConfigs->contains('id', $smtp->id) ? 'selected' : '' }}>{{ $smtp->name }}</option>
-                                    @endforeach
-                                </select>
+                                <div class="relative">
+                                    <button type="button" @click="openSmtp = !openSmtp" @click.away="openSmtp = false" class="relative w-full bg-white border border-gray-300 rounded-md shadow-sm pl-3 pr-10 py-2 text-left cursor-default focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                        <span class="block truncate" x-text="selectedSmtpName"></span>
+                                        <span class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                                            <svg class="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 3a.75.75 0 01.55.24l3.25 3.5a.75.75 0 11-1.1 1.02L10 4.852 7.3 7.76a.75.75 0 01-1.1-1.02l3.25-3.5A.75.75 0 0110 3zm-3.76 9.2a.75.75 0 011.06.04l2.7 2.908 2.7-2.908a.75.75 0 111.1 1.02l-3.25 3.5a.75.75 0 01-1.1 0l-3.25-3.5a.75.75 0 01.04-1.06z" clip-rule="evenodd" /></svg>
+                                        </span>
+                                    </button>
+
+                                    <div x-show="openSmtp" style="display: none;" class="absolute z-10 mt-1 w-full bg-white shadow-lg max-h-60 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none sm:text-sm">
+                                        <div class="px-2 pb-2 sticky top-0 bg-white">
+                                            <input type="text" x-model="searchSmtp" class="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Search SMTP...">
+                                        </div>
+                                        <ul tabindex="-1" role="listbox">
+                                            <template x-for="smtp in filteredSmtps" :key="smtp.id">
+                                                <li @click="selectedSmtp = smtp.id; openSmtp = false; searchSmtp = ''" class="text-gray-900 cursor-pointer select-none relative py-2 pl-3 pr-9 hover:bg-indigo-600 hover:text-white" role="option">
+                                                    <span class="block truncate" :class="selectedSmtp == smtp.id ? 'font-semibold' : 'font-normal'" x-text="smtp.name"></span>
+                                                    <span x-show="selectedSmtp == smtp.id" class="text-indigo-600 absolute inset-y-0 right-0 flex items-center pr-4">
+                                                        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" /></svg>
+                                                    </span>
+                                                </li>
+                                            </template>
+                                            <li x-show="filteredSmtps.length === 0" class="text-gray-500 cursor-default select-none relative py-2 pl-3 pr-9">No SMTPs found</li>
+                                        </ul>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -602,9 +686,10 @@
                         <button type="button" onclick="document.getElementById('testEmailModal').classList.add('hidden')" class="px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                             Cancel
                         </button>
-                        <button type="submit" class="px-4 py-2 bg-indigo-600 border border-transparent rounded-md shadow-sm text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 flex items-center gap-2">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-                            Send Test Email
+                        <button type="submit" :disabled="isLoading" class="px-4 py-2 bg-indigo-600 border border-transparent rounded-md shadow-sm text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 flex items-center gap-2 disabled:opacity-75 disabled:cursor-not-allowed">
+                            <svg x-show="!isLoading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                            <svg x-show="isLoading" style="display:none;" class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            <span x-text="isLoading ? 'Sending...' : 'Send Test Email'"></span>
                         </button>
                     </div>
                 </form>

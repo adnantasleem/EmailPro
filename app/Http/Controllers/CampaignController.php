@@ -649,8 +649,14 @@ class CampaignController extends Controller
         );
 
         if ($result['success']) {
+            if ($request->wantsJson()) {
+                return response()->json(['success' => true, 'message' => 'Test email sent successfully!']);
+            }
             return back()->with('success', 'Test email sent successfully!');
         } else {
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => 'Failed to send test email: ' . $result['error']], 400);
+            }
             return back()->with('error', 'Failed to send test email: ' . $result['error']);
         }
     }
