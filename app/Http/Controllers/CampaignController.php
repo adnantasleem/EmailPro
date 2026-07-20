@@ -207,12 +207,11 @@ class CampaignController extends Controller
         if (!empty($validated['contact_lists'])) {
             $campaign->contactLists()->attach($validated['contact_lists']);
             
-            $campaign->update(['import_status' => 'importing']);
-            \App\Jobs\ImportCampaignRecipientsJob::dispatch($campaign->id, $validated['contact_lists']);
+            $this->syncRecipientsFromLists($campaign, $validated['contact_lists']);
         }
 
         return redirect()->route('campaigns.show', $campaign)
-            ->with('success', "Campaign created. Contacts are being imported in the background.");
+            ->with('success', "Campaign created successfully. Contacts have been instantly attached.");
     }
 
     /**
@@ -590,11 +589,10 @@ class CampaignController extends Controller
             
             // Import contacts from newly added lists
             if (!empty($addedListIds)) {
-                $campaign->update(['import_status' => 'importing']);
-                \App\Jobs\ImportCampaignRecipientsJob::dispatch($campaign->id, array_values($addedListIds));
+                $this->syncRecipientsFromLists($campaign, array_values($addedListIds));
                 
                 return redirect()->route('campaigns.show', $campaign)
-                    ->with('success', "Campaign updated. New contacts are being imported in the background.");
+                    ->with('success', "Campaign updated. Contacts have been instantly attached.");
             }
         }
 
@@ -1046,5 +1044,53 @@ class CampaignController extends Controller
 
         return redirect()->route('campaigns.show', $newCampaign)
             ->with('success', "Campaign duplicated as \"{$newCampaign->name}\". You can edit it before starting.");
+    }
+
+    /**
+     * Instantly synchronize recipients from attached contact lists using bulk SQL.
+     */
+    protected function syncRecipientsFromLists(Campaign $campaign, array $listIds)
+    {
+        if (empty($listIds)) return 0;
+        
+        $now = now()->toDateTimeString();
+        $placeholders = implode(',', array_fill(0, count($listIds), '?'));
+        
+        $bindings = array_merge(
+            [$campaign->id, $now, $now],
+            $listIds,
+            [$campaign->user_id, $campaign->user_id]
+        );
+
+        $query = "
+            INSERT IGNORE INTO recipients (campaign_id, email, name, custom_fields, status, validation_result, validated_at, created_at, updated_at)
+            SELECT 
+                ?, 
+                LOWER(c.email), 
+                MAX(c.name), 
+                MAX(c.custom_fields), 
+                IF(MAX(c.validation_status) = 'valid', 'valid', 'pending'), 
+                MAX(c.validation_result), 
+                MAX(c.validated_at), 
+                ?, 
+                ?
+            FROM contacts c
+            WHERE c.contact_list_id IN ($placeholders)
+              AND c.is_active = 1
+              AND c.validation_status != 'invalid'
+              AND LOWER(c.email) NOT IN (SELECT LOWER(email) FROM unsubscribes WHERE user_id = ?)
+              AND LOWER(c.email) NOT IN (SELECT LOWER(email) FROM invalid_emails WHERE user_id = ?)
+            GROUP BY LOWER(c.email)
+        ";
+
+        $affected = \Illuminate\Support\Facades\DB::insert($query, $bindings);
+
+        // Update campaign status instantly since we don't need background jobs anymore
+        $campaign->update([
+            'import_status' => 'done',
+            'imported_count' => \Illuminate\Support\Facades\DB::table('recipients')->where('campaign_id', $campaign->id)->count(),
+        ]);
+        
+        return $affected;
     }
 }
