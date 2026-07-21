@@ -22,6 +22,7 @@ class User extends Authenticatable
         'email',
         'password',
         'is_admin',
+        'manages_own_smtp',
         'daily_email_limit',
         'monthly_email_limit',
         'yearly_email_limit',
@@ -48,6 +49,8 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_admin' => 'boolean',
+            'manages_own_smtp' => 'boolean',
             'daily_email_limit' => 'integer',
             'monthly_email_limit' => 'integer',
             'yearly_email_limit' => 'integer',

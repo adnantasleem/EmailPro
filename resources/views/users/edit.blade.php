@@ -121,6 +121,24 @@
                         @enderror
                     </div>
 
+                    <div class="mb-6 pt-4 border-t">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">SMTP Management</label>
+                        <p class="text-xs text-gray-500 mb-3">Who manages this user's SMTP accounts?</p>
+                        <div class="space-y-2">
+                            <label class="flex items-center">
+                                <input type="radio" name="manages_own_smtp" value="1" {{ old('manages_own_smtp', $user->manages_own_smtp) ? 'checked' : '' }} class="text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-gray-300">
+                                <span class="ml-2 text-sm text-gray-700">User manages their own SMTP accounts</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="radio" name="manages_own_smtp" value="0" {{ !old('manages_own_smtp', $user->manages_own_smtp) ? 'checked' : '' }} class="text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-gray-300">
+                                <span class="ml-2 text-sm text-gray-700">Admin provides SMTP account (Hide SMTP menu from user)</span>
+                            </label>
+                        </div>
+                        @error('manages_own_smtp')
+                            <p class="text-red-500 text-xs mt-1">{{ $message }}</p>
+                        @enderror
+                    </div>
+
                     <div class="flex items-center justify-end gap-3">
                         <a href="{{ route('admin.users.index') }}" class="text-gray-600 hover:text-gray-900 text-sm">Cancel</a>
                         <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:opacity-90 transition" style="background-color: #4338CA;">
