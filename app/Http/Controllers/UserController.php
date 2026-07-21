@@ -41,16 +41,23 @@ class UserController extends Controller
             'yearly_email_limit' => ['nullable', 'integer', 'min:0'],
             'expires_at' => ['nullable', 'date'],
             'manages_own_smtp' => ['boolean'],
-            'smtp_name' => ['exclude_if:manages_own_smtp,1', 'required_if:manages_own_smtp,0', 'string', 'max:255'],
-            'smtp_host' => ['exclude_if:manages_own_smtp,1', 'required_if:manages_own_smtp,0', 'string', 'max:255'],
-            'smtp_port' => ['exclude_if:manages_own_smtp,1', 'required_if:manages_own_smtp,0', 'integer', 'min:1', 'max:65535'],
-            'smtp_encryption' => ['exclude_if:manages_own_smtp,1', 'required_if:manages_own_smtp,0', \Illuminate\Validation\Rule::in(['tls', 'ssl', 'none'])],
-            'smtp_from_name' => ['exclude_if:manages_own_smtp,1', 'required_if:manages_own_smtp,0', 'string', 'max:255'],
-            'smtp_username' => ['exclude_if:manages_own_smtp,1', 'required_if:manages_own_smtp,0', 'email', 'max:255'],
-            'smtp_password' => ['exclude_if:manages_own_smtp,1', 'required_if:manages_own_smtp,0', 'string'],
+            'smtps' => ['exclude_if:manages_own_smtp,1', 'required_if:manages_own_smtp,0', 'array'],
+            'smtps.*.name' => ['required_if:manages_own_smtp,0', 'string', 'max:255'],
+            'smtps.*.host' => ['required_if:manages_own_smtp,0', 'string', 'max:255'],
+            'smtps.*.port' => ['required_if:manages_own_smtp,0', 'integer', 'min:1', 'max:65535'],
+            'smtps.*.encryption' => ['required_if:manages_own_smtp,0', \Illuminate\Validation\Rule::in(['tls', 'ssl', 'none'])],
+            'smtps.*.from_name' => ['required_if:manages_own_smtp,0', 'string', 'max:255'],
+            'smtps.*.username' => ['required_if:manages_own_smtp,0', 'email', 'max:255'],
+            'smtps.*.password' => ['required_if:manages_own_smtp,0', 'string'],
+            'smtps.*.pacing_strategy' => ['required_if:manages_own_smtp,0', 'string', 'in:per_hour,per_day'],
+            'smtps.*.daily_limit' => ['nullable', 'integer', 'min:1'],
+            'smtps.*.min_emails_per_hour' => ['nullable', 'integer', 'min:1'],
+            'smtps.*.max_emails_per_hour' => ['nullable', 'integer', 'min:1', 'gte:smtps.*.min_emails_per_hour'],
+            'smtps.*.min_emails_per_day' => ['nullable', 'integer', 'min:1'],
+            'smtps.*.max_emails_per_day' => ['nullable', 'integer', 'min:1', 'gte:smtps.*.min_emails_per_day'],
         ]);
 
-        User::create([
+        $user = User::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
@@ -62,22 +69,29 @@ class UserController extends Controller
             'expires_at' => $validated['expires_at'] ?: null,
         ]);
 
-        if (isset($validated['manages_own_smtp']) && $validated['manages_own_smtp'] == false && !empty($validated['smtp_host'])) {
-            $password = str_replace(' ', '', $validated['smtp_password']);
-            \App\Models\SmtpConfig::create([
-                'user_id' => $user->id,
-                'name' => $validated['smtp_name'],
-                'host' => $validated['smtp_host'],
-                'port' => $validated['smtp_port'],
-                'encryption' => $validated['smtp_encryption'],
-                'from_name' => $validated['smtp_from_name'],
-                'from_email' => $validated['smtp_username'],
-                'username' => $validated['smtp_username'],
-                'password' => $password,
-                'is_active' => true,
-                'pacing_strategy' => 'per_hour', // Default reasonable limit so it's ready to use
-                'daily_limit' => null,
-            ]);
+        if (isset($validated['manages_own_smtp']) && $validated['manages_own_smtp'] == false && !empty($validated['smtps'])) {
+            foreach ($validated['smtps'] as $smtpData) {
+                if (empty($smtpData['host'])) continue;
+                $password = str_replace(' ', '', $smtpData['password']);
+                \App\Models\SmtpConfig::create([
+                    'user_id' => $user->id,
+                    'name' => $smtpData['name'],
+                    'host' => $smtpData['host'],
+                    'port' => $smtpData['port'],
+                    'encryption' => $smtpData['encryption'],
+                    'from_name' => $smtpData['from_name'],
+                    'from_email' => $smtpData['username'],
+                    'username' => $smtpData['username'],
+                    'password' => $password,
+                    'is_active' => true,
+                    'pacing_strategy' => $smtpData['pacing_strategy'],
+                    'daily_limit' => $smtpData['daily_limit'] ?: null,
+                    'min_emails_per_hour' => $smtpData['min_emails_per_hour'] ?: null,
+                    'max_emails_per_hour' => $smtpData['max_emails_per_hour'] ?: null,
+                    'min_emails_per_day' => $smtpData['min_emails_per_day'] ?: null,
+                    'max_emails_per_day' => $smtpData['max_emails_per_day'] ?: null,
+                ]);
+            }
         }
 
         return redirect()->route('admin.users.index')
