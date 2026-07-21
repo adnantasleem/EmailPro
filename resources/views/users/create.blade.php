@@ -4,7 +4,7 @@
     </x-slot>
 
     <div class="py-12" x-data="{ 
-        managesSmtp: {{ old('manages_own_smtp', '1') == '1' ? 'true' : 'false' }} 
+        managesSmtp: '{{ old('manages_own_smtp', '1') }}' 
     }">
         <div class="max-w-4xl mx-auto sm:px-6 lg:px-8">
             <form method="POST" action="{{ route('admin.users.store') }}">
@@ -118,7 +118,7 @@
                         </div>
 
                         <!-- Dynamic SMTP Fields -->
-                        <div x-show="managesSmtp == 'false' || managesSmtp === false" style="display: none;" class="space-y-4 border-t pt-4">
+                        <div x-show="managesSmtp == '0'" style="display: none;" class="space-y-4 border-t pt-4">
                             <p class="text-sm font-medium text-indigo-600 mb-2">Configure Initial SMTP Account</p>
                             
                             <div>
