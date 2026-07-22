@@ -70,7 +70,7 @@
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                     <div class="flex justify-end space-x-3 items-center">
-                                        @if(!$user->is_admin && $user->id !== auth()->id())
+                                        @if($user->id !== auth()->id())
                                             <form action="{{ route('admin.users.impersonate', $user) }}" method="POST" class="inline">
                                                 @csrf
                                                 <button type="submit" class="text-indigo-600 hover:text-indigo-900 font-medium flex items-center gap-1" title="Login as user">

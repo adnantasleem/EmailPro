@@ -164,9 +164,6 @@ class UserController extends Controller
      */
     public function impersonate(User $user)
     {
-        if ($user->is_admin) {
-            return back()->with('error', 'You cannot impersonate an admin.');
-        }
 
         if (auth()->id() === $user->id) {
             return back()->with('error', 'You are already logged in as this user.');
