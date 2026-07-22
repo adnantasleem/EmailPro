@@ -125,10 +125,21 @@ class RecipientController extends Controller
 
             $query->chunk(1000, function ($recipients) use ($file) {
                 foreach ($recipients as $recipient) {
+                    $status = $recipient->status;
+                    
+                    if ($status === \App\Models\Recipient::STATUS_SENT) {
+                        $status = 'delivered';
+                    } elseif ($status === \App\Models\Recipient::STATUS_FAILED && !empty($recipient->error_message)) {
+                        $error = strtolower($recipient->error_message);
+                        if (str_contains($error, 'bounce') || str_contains($error, 'rejected') || str_contains($error, '550') || str_contains($error, 'not found') || str_contains($error, 'does not exist')) {
+                            $status = 'bounced';
+                        }
+                    }
+
                     fputcsv($file, [
                         $recipient->email,
                         $recipient->name ?? '',
-                        $recipient->status,
+                        $status,
                         $recipient->sent_at?->format('Y-m-d H:i:s') ?? '',
                         $recipient->error_message ?? '',
                     ]);

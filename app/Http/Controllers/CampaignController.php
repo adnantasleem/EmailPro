@@ -933,8 +933,15 @@ class CampaignController extends Controller
                 ->chunk(5000, function ($recipients) use ($handle) {
                     foreach ($recipients as $recipient) {
                         $status = $recipient->status;
+                        
                         if ($status === \App\Models\Recipient::STATUS_SENT) {
                             $status = 'delivered';
+                        } elseif ($status === \App\Models\Recipient::STATUS_FAILED && !empty($recipient->error_message)) {
+                            // Check if the error message looks like a bounce
+                            $error = strtolower($recipient->error_message);
+                            if (str_contains($error, 'bounce') || str_contains($error, 'rejected') || str_contains($error, '550') || str_contains($error, 'not found') || str_contains($error, 'does not exist')) {
+                                $status = 'bounced';
+                            }
                         }
                         
                         fputcsv($handle, [
