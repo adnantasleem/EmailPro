@@ -225,6 +225,8 @@ class EmailSenderService
             ]);
             // Force an ID for things like unsubscribe URLs
             $recipient->id = 999999999; 
+            // Set a dummy unsubscribe token so it doesn't try to save() to the database
+            $recipient->unsubscribe_token = 'test_token_' . uniqid();
 
             // Prepare email content with variable replacement
             $unsubscribeUrl = $recipient->getUnsubscribeUrl();
