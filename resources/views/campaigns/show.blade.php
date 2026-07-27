@@ -120,49 +120,61 @@
             </div>
 
             <!-- Stats Overview -->
-            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
-                <div class="bg-white p-4 rounded-lg shadow-sm text-center">
-                    <div class="text-2xl font-bold text-gray-900">{{ $stats['total'] }}</div>
-                    <div class="text-xs text-gray-500">Total</div>
-                </div>
-                <div class="bg-white p-4 rounded-lg shadow-sm text-center">
-                    <div class="text-2xl font-bold text-yellow-600">{{ $stats['pending'] }}</div>
-                    <div class="text-xs text-gray-500">Pending</div>
-                </div>
-                <div class="bg-white p-4 rounded-lg shadow-sm text-center">
-                    <div class="text-2xl font-bold text-blue-600">{{ $stats['validating'] }}</div>
-                    <div class="text-xs text-gray-500">Validating</div>
-                </div>
-                <div class="bg-white p-4 rounded-lg shadow-sm text-center">
-                    <div class="text-2xl font-bold text-green-600">{{ $stats['valid'] }}</div>
-                    <div class="text-xs text-gray-500">Valid</div>
-                </div>
-                <div class="bg-white p-4 rounded-lg shadow-sm text-center">
-                    <div class="text-2xl font-bold text-red-600">{{ $stats['invalid'] }}</div>
-                    <div class="text-xs text-gray-500">Invalid</div>
-                </div>
-                <div class="bg-white p-4 rounded-lg shadow-sm text-center">
-                    <div class="text-2xl font-bold text-indigo-600">{{ $stats['sent'] }}</div>
-                    <div class="text-xs text-gray-500">Sent</div>
-                </div>
-                <div class="bg-white p-4 rounded-lg shadow-sm text-center">
-                    <div class="text-2xl font-bold text-orange-600">{{ $stats['failed'] }}</div>
-                    <div class="text-xs text-gray-500">Failed</div>
-                    @if($stats['failed'] > 0)
-                    <form action="{{ route('campaigns.retry-failed', $campaign) }}" method="POST" class="mt-2" onsubmit="return confirm('Retry all {{ $stats['failed'] }} failed emails?')">
-                        @csrf
-                        <button type="submit" class="text-xs px-2 py-1 bg-orange-600 text-white rounded hover:bg-orange-700">
-                            🔄 Retry
-                        </button>
-                    </form>
-                    @endif
-                </div>
-                <div class="bg-white p-4 rounded-lg shadow-sm text-center border-2 border-purple-200">
-                    <div class="text-2xl font-bold text-purple-600">{{ $stats['opened'] ?? 0 }}</div>
-                    <div class="text-xs text-gray-500">👁️ Opened</div>
-                    @if(($stats['sent'] ?? 0) > 0)
-                        <div class="text-xs text-purple-500 mt-1">{{ number_format((($stats['opened'] ?? 0) / $stats['sent']) * 100, 1) }}% rate</div>
-                    @endif
+            <div class="bg-white rounded-lg shadow-sm mb-6 px-4 py-3">
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-lg font-bold text-gray-900">{{ $stats['total'] }}</span>
+                        <span class="text-xs text-gray-500">Total</span>
+                    </div>
+                    <span class="hidden sm:inline text-gray-300">|</span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-lg font-bold text-yellow-600">{{ $stats['pending'] }}</span>
+                        <span class="text-xs text-gray-500">Pending</span>
+                    </div>
+                    <span class="hidden sm:inline text-gray-300">|</span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-lg font-bold text-blue-600">{{ $stats['validating'] }}</span>
+                        <span class="text-xs text-gray-500">Validating</span>
+                    </div>
+                    <span class="hidden sm:inline text-gray-300">|</span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-lg font-bold text-green-600">{{ $stats['valid'] }}</span>
+                        <span class="text-xs text-gray-500">Valid</span>
+                    </div>
+                    <span class="hidden sm:inline text-gray-300">|</span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-lg font-bold text-red-600">{{ $stats['invalid'] }}</span>
+                        <span class="text-xs text-gray-500">Invalid</span>
+                    </div>
+                    <span class="hidden sm:inline text-gray-300">|</span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-lg font-bold text-indigo-600">{{ $stats['sent'] }}</span>
+                        <span class="text-xs text-gray-500">Sent</span>
+                    </div>
+                    <span class="hidden sm:inline text-gray-300">|</span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-lg font-bold text-orange-600">{{ $stats['failed'] }}</span>
+                        <span class="text-xs text-gray-500">Failed</span>
+                        @if($stats['failed'] > 0)
+                        <form action="{{ route('campaigns.retry-failed', $campaign) }}" method="POST" class="inline" onsubmit="return confirm('Retry all {{ $stats['failed'] }} failed emails?')">
+                            @csrf
+                            <button type="submit" class="text-xs px-1.5 py-0.5 bg-orange-600 text-white rounded hover:bg-orange-700">🔄</button>
+                        </form>
+                        @endif
+                    </div>
+                    <span class="hidden sm:inline text-gray-300">|</span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-lg font-bold text-purple-700">{{ $stats['bounced'] ?? 0 }}</span>
+                        <span class="text-xs text-gray-500">Bounced</span>
+                    </div>
+                    <span class="hidden sm:inline text-gray-300">|</span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-lg font-bold text-purple-600">{{ $stats['opened'] ?? 0 }}</span>
+                        <span class="text-xs text-gray-500">👁️ Opened</span>
+                        @if(($stats['sent'] ?? 0) > 0)
+                            <span class="text-xs text-purple-500">({{ number_format((($stats['opened'] ?? 0) / $stats['sent']) * 100, 1) }}%)</span>
+                        @endif
+                    </div>
                 </div>
             </div>
 

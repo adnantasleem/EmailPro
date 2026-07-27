@@ -150,6 +150,50 @@
                     </div>
                     <p class="mb-6 text-sm text-gray-500">Optional: Only send emails during this time window (e.g., 09:00 to 17:00). Leave blank to send 24/7.</p>
 
+                    <!-- Bounce Monitoring (IMAP) -->
+                    <div class="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50" x-data="{ bounceEnabled: {{ old('bounce_check_enabled', $smtp->bounce_check_enabled ? 'true' : 'false') }} }">
+                        <div class="flex items-center mb-4">
+                            <input type="checkbox" id="bounce_check_enabled" name="bounce_check_enabled" value="1" x-model="bounceEnabled" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500">
+                            <label for="bounce_check_enabled" class="ms-2 block text-sm font-medium text-gray-700">Enable automatic bounce detection (IMAP)</label>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-4 ml-6">EmailPro will check this mailbox for bounce notifications every 5 minutes. (Uses the same username and password as SMTP).</p>
+
+                        <div x-show="bounceEnabled" x-cloak class="space-y-4 ml-6 pl-4 border-l-2 border-indigo-200">
+                            <div class="grid grid-cols-2 gap-4">
+                                <!-- IMAP Host -->
+                                <div>
+                                    <x-input-label for="imap_host" :value="__('IMAP Host')" />
+                                    <x-text-input id="imap_host" name="imap_host" type="text" class="mt-1 block w-full" :value="old('imap_host', $smtp->imap_host)" placeholder="imap.gmail.com" />
+                                    <x-input-error :messages="$errors->get('imap_host')" class="mt-2" />
+                                </div>
+                                <!-- IMAP Port -->
+                                <div>
+                                    <x-input-label for="imap_port" :value="__('IMAP Port')" />
+                                    <x-text-input id="imap_port" name="imap_port" type="number" class="mt-1 block w-full" :value="old('imap_port', $smtp->imap_port ?? 993)" />
+                                    <x-input-error :messages="$errors->get('imap_port')" class="mt-2" />
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <!-- IMAP Encryption -->
+                                <div>
+                                    <x-input-label for="imap_encryption" :value="__('IMAP Encryption')" />
+                                    <select id="imap_encryption" name="imap_encryption" class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm">
+                                        <option value="ssl" {{ old('imap_encryption', $smtp->imap_encryption) == 'ssl' ? 'selected' : '' }}>SSL</option>
+                                        <option value="tls" {{ old('imap_encryption', $smtp->imap_encryption) == 'tls' ? 'selected' : '' }}>TLS</option>
+                                        <option value="none" {{ old('imap_encryption', $smtp->imap_encryption) == 'none' ? 'selected' : '' }}>None</option>
+                                    </select>
+                                    <x-input-error :messages="$errors->get('imap_encryption')" class="mt-2" />
+                                </div>
+                                <!-- IMAP Folder -->
+                                <div>
+                                    <x-input-label for="imap_folder" :value="__('IMAP Folder')" />
+                                    <x-text-input id="imap_folder" name="imap_folder" type="text" class="mt-1 block w-full" :value="old('imap_folder', $smtp->imap_folder ?? 'INBOX')" />
+                                    <x-input-error :messages="$errors->get('imap_folder')" class="mt-2" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Active -->
                     <div class="mb-6">
                         <label class="flex items-center">

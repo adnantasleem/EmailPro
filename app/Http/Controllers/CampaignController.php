@@ -315,12 +315,15 @@ class CampaignController extends Controller
         arsort($errorCategories);
 
         // Daily breakdown
+        $bounceCondition = "(status = 'bounced' OR (status = 'failed' AND (error_message LIKE '%bounce%' OR error_message LIKE '%rejected%' OR error_message LIKE '%550%' OR error_message LIKE '%551%' OR error_message LIKE '%552%' OR error_message LIKE '%553%' OR error_message LIKE '%554%' OR error_message LIKE '%5.1.1%' OR error_message LIKE '%not found%' OR error_message LIKE '%does not exist%' OR error_message LIKE '%unavailable%' OR error_message LIKE '%undeliverable%' OR error_message LIKE '%unroutable%')))";
+        $failedCondition = "(status = 'failed' AND (error_message IS NULL OR (error_message NOT LIKE '%bounce%' AND error_message NOT LIKE '%rejected%' AND error_message NOT LIKE '%550%' AND error_message NOT LIKE '%551%' AND error_message NOT LIKE '%552%' AND error_message NOT LIKE '%553%' AND error_message NOT LIKE '%554%' AND error_message NOT LIKE '%5.1.1%' AND error_message NOT LIKE '%not found%' AND error_message NOT LIKE '%does not exist%' AND error_message NOT LIKE '%unavailable%' AND error_message NOT LIKE '%undeliverable%' AND error_message NOT LIKE '%unroutable%')))";
+
         $dailyStats = $campaign->recipients()
             ->selectRaw('DATE(COALESCE(sent_at, updated_at)) as date')
             ->selectRaw('COUNT(*) as total')
             ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as sent', [\App\Models\Recipient::STATUS_SENT])
-            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as failed', [\App\Models\Recipient::STATUS_FAILED])
-            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as bounced', [\App\Models\Recipient::STATUS_BOUNCED])
+            ->selectRaw("SUM(CASE WHEN {$failedCondition} THEN 1 ELSE 0 END) as failed")
+            ->selectRaw("SUM(CASE WHEN {$bounceCondition} THEN 1 ELSE 0 END) as bounced")
             ->whereIn('status', [
                 \App\Models\Recipient::STATUS_SENT, 
                 \App\Models\Recipient::STATUS_FAILED, 
@@ -932,26 +935,33 @@ class CampaignController extends Controller
                 ->orderBy('id')
                 ->chunk(5000, function ($recipients) use ($handle) {
                     foreach ($recipients as $recipient) {
-                        $status = $recipient->status;
+                        $rawStatus = trim($recipient->status ?? '');
+                        $errorMsg = $recipient->error_message ?? '';
                         
-                        if ($status === \App\Models\Recipient::STATUS_SENT) {
-                            $status = 'delivered';
-                        } elseif ($status === \App\Models\Recipient::STATUS_FAILED && !empty($recipient->error_message)) {
-                            // Check if the error message looks like a bounce
-                            $error = strtolower($recipient->error_message);
-                            if (str_contains($error, 'bounce') || str_contains($error, 'rejected') || str_contains($error, '550') || str_contains($error, 'not found') || str_contains($error, 'does not exist')) {
-                                $status = 'bounced';
+                        // Determine display status
+                        if ($rawStatus === 'sent') {
+                            $displayStatus = 'delivered';
+                        } elseif ($rawStatus === 'bounced') {
+                            $displayStatus = 'bounced';
+                        } elseif ($rawStatus === 'failed') {
+                            // Check if this "failed" is actually a bounce
+                            if (\App\Models\Recipient::isBounceError($errorMsg)) {
+                                $displayStatus = 'bounced';
+                            } else {
+                                $displayStatus = 'failed';
                             }
+                        } else {
+                            $displayStatus = $rawStatus;
                         }
                         
                         fputcsv($handle, [
                             $recipient->email,
                             $recipient->name ?? '',
-                            $status,
+                            $displayStatus,
                             $recipient->sent_at ?? '',
                             $recipient->opened_at ?? '',
-                            $recipient->open_count,
-                            $recipient->error_message ?? ''
+                            $recipient->open_count ?? 0,
+                            $errorMsg
                         ]);
                     }
 

@@ -110,18 +110,28 @@ class EmailSenderService
             $errorMsg = $e->getMessage();
             $result['error'] = $errorMsg;
 
+            $isBounce = Recipient::isBounceError($errorMsg);
+
             // Log failure and record bounce if we have SMTP info
             if (isset($smtp)) {
-                $smtp->recordBounce();
+                if ($isBounce) {
+                    $smtp->recordBounce();
+                }
                 
                 if (isset($subject) && isset($body)) {
-                    EmailLog::logFailure($campaign, $recipient, $smtp, $subject, $body, $errorMsg);
+                    if ($isBounce) {
+                        EmailLog::logBounce($campaign, $recipient, $smtp, $subject, $body, $errorMsg);
+                    } else {
+                        EmailLog::logFailure($campaign, $recipient, $smtp, $subject, $body, $errorMsg);
+                    }
                 }
             }
 
             // Don't mark recipient as failed if it's a quota/capacity issue
             if ($errorMsg === 'No available SMTP accounts' || str_starts_with($errorMsg, 'Monthly email limit reached')) {
                 // Return success=false but keep recipient in pending/valid state for later
+            } elseif ($isBounce) {
+                $recipient->markAsBounced($errorMsg);
             } else {
                 $recipient->markAsFailed($errorMsg);
             }

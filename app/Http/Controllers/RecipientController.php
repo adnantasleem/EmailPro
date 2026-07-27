@@ -17,7 +17,13 @@ class RecipientController extends Controller
 
         // Filter by status
         if ($request->has('status') && $request->status !== 'all') {
-            $query->where('status', $request->status);
+            if ($request->status === 'bounced') {
+                $query->bounced();
+            } elseif ($request->status === 'failed') {
+                $query->failedNonBounce();
+            } else {
+                $query->where('status', $request->status);
+            }
         }
 
         // Search by email
@@ -33,7 +39,8 @@ class RecipientController extends Controller
             'valid' => $campaign->recipients()->status('valid')->count(),
             'invalid' => $campaign->recipients()->whereIn('status', ['invalid', 'disposable'])->count(),
             'sent' => $campaign->recipients()->status('sent')->count(),
-            'failed' => $campaign->recipients()->status('failed')->count(),
+            'failed' => $campaign->recipients()->failedNonBounce()->count(),
+            'bounced' => $campaign->recipients()->bounced()->count(),
         ];
 
         return view('recipients.index', compact('campaign', 'recipients', 'statusCounts'));
@@ -112,7 +119,13 @@ class RecipientController extends Controller
         $query = $campaign->recipients();
 
         if ($request->has('status') && $request->status !== 'all') {
-            $query->where('status', $request->status);
+            if ($request->status === 'bounced') {
+                $query->bounced();
+            } elseif ($request->status === 'failed') {
+                $query->failedNonBounce();
+            } else {
+                $query->where('status', $request->status);
+            }
         }
 
         $query->orderBy('id');
@@ -129,10 +142,13 @@ class RecipientController extends Controller
                     
                     if ($status === \App\Models\Recipient::STATUS_SENT) {
                         $status = 'delivered';
-                    } elseif ($status === \App\Models\Recipient::STATUS_FAILED && !empty($recipient->error_message)) {
-                        $error = strtolower($recipient->error_message);
-                        if (str_contains($error, 'bounce') || str_contains($error, 'rejected') || str_contains($error, '550') || str_contains($error, 'not found') || str_contains($error, 'does not exist')) {
+                    } elseif ($status === \App\Models\Recipient::STATUS_BOUNCED) {
+                        $status = 'bounced';
+                    } elseif ($status === \App\Models\Recipient::STATUS_FAILED) {
+                        if (\App\Models\Recipient::isBounceError($recipient->error_message ?? '')) {
                             $status = 'bounced';
+                        } else {
+                            $status = 'failed';
                         }
                     }
 

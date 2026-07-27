@@ -83,9 +83,15 @@ class SmtpConfigController extends Controller
             'active_time_start' => 'nullable|date_format:H:i',
             'active_time_end' => 'nullable|date_format:H:i|required_with:active_time_start',
             'is_active' => 'boolean',
+            'bounce_check_enabled' => 'boolean',
+            'imap_host' => 'nullable|required_if:bounce_check_enabled,true|string|max:255',
+            'imap_port' => 'nullable|required_if:bounce_check_enabled,true|integer|min:1|max:65535',
+            'imap_encryption' => ['nullable', 'required_if:bounce_check_enabled,true', Rule::in(['tls', 'ssl', 'none'])],
+            'imap_folder' => 'nullable|string|max:255',
         ]);
 
         $validated['is_active'] = $request->has('is_active');
+        $validated['bounce_check_enabled'] = $request->has('bounce_check_enabled');
         $validated['user_id'] = auth()->id();
 
         // Remove spaces from password (for App Passwords like "abcd efgh ijkl mnop")
@@ -147,9 +153,15 @@ class SmtpConfigController extends Controller
             'active_time_start' => 'nullable|date_format:H:i',
             'active_time_end' => 'nullable|date_format:H:i|required_with:active_time_start',
             'is_active' => 'boolean',
+            'bounce_check_enabled' => 'boolean',
+            'imap_host' => 'nullable|required_if:bounce_check_enabled,true|string|max:255',
+            'imap_port' => 'nullable|required_if:bounce_check_enabled,true|integer|min:1|max:65535',
+            'imap_encryption' => ['nullable', 'required_if:bounce_check_enabled,true', Rule::in(['tls', 'ssl', 'none'])],
+            'imap_folder' => 'nullable|string|max:255',
         ]);
 
         $validated['is_active'] = $request->has('is_active');
+        $validated['bounce_check_enabled'] = $request->has('bounce_check_enabled');
 
         // Only update password if provided
         if (empty($validated['password'])) {
@@ -177,6 +189,50 @@ class SmtpConfigController extends Controller
 
         return redirect()->route('smtp.index')
             ->with('success', 'SMTP configuration updated successfully.');
+    }
+
+    /**
+     * Delete an email log (for manual cleanup).
+     */
+    public function destroyLog(SmtpConfig $smtp, \App\Models\EmailLog $log)
+    {
+        if ((int) $smtp->user_id !== auth()->id() || (int) $log->smtp_config_id !== $smtp->id) {
+            abort(403);
+        }
+
+        $log->delete();
+
+        return redirect()->back()->with('success', 'Email log deleted successfully.');
+    }
+
+    /**
+     * Test the IMAP connection for the given SMTP config.
+     */
+    public function testImapConnection(SmtpConfig $smtp)
+    {
+        if ((int) $smtp->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        if (!$smtp->bounce_check_enabled) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Bounce monitoring is not enabled for this SMTP configuration.'
+            ], 400);
+        }
+
+        try {
+            $smtp->testImapConnection();
+            return response()->json([
+                'success' => true,
+                'message' => 'IMAP connection successful! EmailPro can monitor bounces for this account.'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**

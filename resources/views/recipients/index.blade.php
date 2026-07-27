@@ -44,6 +44,10 @@
                    class="px-4 py-2 rounded-md text-sm font-medium {{ request('status') === 'failed' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
                     Failed ({{ $statusCounts['failed'] }})
                 </a>
+                <a href="{{ route('recipients.index', ['campaign' => $campaign, 'status' => 'bounced']) }}" 
+                   class="px-4 py-2 rounded-md text-sm font-medium {{ request('status') === 'bounced' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
+                    Bounced ({{ $statusCounts['bounced'] ?? 0 }})
+                </a>
             </div>
 
             <!-- Recipients Table -->
@@ -79,16 +83,23 @@
                                     <td class="px-4 py-3 text-sm text-gray-900">{{ $recipient->email }}</td>
                                     <td class="px-4 py-3 text-sm text-gray-500">{{ $recipient->name ?? '-' }}</td>
                                     <td class="px-4 py-3">
-                                        <span class="px-2 py-1 text-xs font-semibold rounded-full
-                                            @if($recipient->status === 'pending') bg-yellow-100 text-yellow-800
-                                            @elseif($recipient->status === 'valid') bg-green-100 text-green-800
-                                            @elseif(in_array($recipient->status, ['invalid', 'disposable'])) bg-red-100 text-red-800
-                                            @elseif($recipient->status === 'sent') bg-indigo-100 text-indigo-800
-                                            @elseif($recipient->status === 'failed') bg-orange-100 text-orange-800
-                                            @else bg-gray-100 text-gray-800
-                                            @endif">
-                                            {{ ucfirst($recipient->status) }}
-                                        </span>
+                                        @if($recipient->isBounced())
+                                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800" title="{{ $recipient->error_message }}">
+                                                Bounced
+                                            </span>
+                                        @elseif($recipient->status === 'pending')
+                                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">Pending</span>
+                                        @elseif($recipient->status === 'valid')
+                                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Valid</span>
+                                        @elseif(in_array($recipient->status, ['invalid', 'disposable']))
+                                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Invalid</span>
+                                        @elseif($recipient->status === 'sent')
+                                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800">Sent</span>
+                                        @elseif($recipient->status === 'failed')
+                                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800" title="{{ $recipient->error_message }}">Failed</span>
+                                        @else
+                                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">{{ ucfirst($recipient->status) }}</span>
+                                        @endif
                                     </td>
                                     <td class="px-4 py-3 text-sm text-gray-500">{{ $recipient->sent_at?->format('M d, H:i') ?? '-' }}</td>
                                     <td class="px-4 py-3 text-right">

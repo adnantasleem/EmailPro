@@ -27,6 +27,7 @@ class EmailLog extends Model
 
     const STATUS_SENT = 'sent';
     const STATUS_FAILED = 'failed';
+    const STATUS_BOUNCED = 'bounced';
 
     /**
      * Get the campaign.
@@ -107,6 +108,29 @@ class EmailLog extends Model
             'subject_line_id' => $subjectLine->id,
             'body_template_id' => $bodyTemplate->id,
             'status' => self::STATUS_FAILED,
+            'error_message' => $errorMessage,
+            'sent_at' => now(),
+        ]);
+    }
+
+    /**
+     * Create a bounce log entry.
+     */
+    public static function logBounce(
+        Campaign $campaign,
+        Recipient $recipient,
+        SmtpConfig $smtpConfig,
+        SubjectLine $subjectLine,
+        BodyTemplate $bodyTemplate,
+        string $errorMessage
+    ): self {
+        return self::create([
+            'campaign_id' => $campaign->id,
+            'recipient_id' => $recipient->id,
+            'smtp_config_id' => $smtpConfig->id,
+            'subject_line_id' => $subjectLine->id,
+            'body_template_id' => $bodyTemplate->id,
+            'status' => self::STATUS_BOUNCED,
             'error_message' => $errorMessage,
             'sent_at' => now(),
         ]);

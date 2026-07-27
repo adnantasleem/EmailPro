@@ -122,6 +122,144 @@ class Recipient extends Model
     }
 
     /**
+     * Mark recipient as bounced.
+     */
+    public function markAsBounced(string $errorMessage): void
+    {
+        $this->update([
+            'status' => self::STATUS_BOUNCED,
+            'error_message' => $errorMessage,
+        ]);
+    }
+
+    /**
+     * Determine if an error message indicates a bounce delivery failure.
+     */
+    public static function isBounceError(?string $errorMessage): bool
+    {
+        if (empty($errorMessage)) {
+            return false;
+        }
+
+        $error = strtolower($errorMessage);
+        
+        // Bounce keywords and phrases
+        $bounceKeywords = [
+            'bounce',
+            'bounced',
+            'rejected',
+            'user unknown',
+            'unknown user',
+            'no such user',
+            'user not found',
+            'recipient not found',
+            'account not found',
+            'mailbox unavailable',
+            'mailbox not found',
+            'mailbox full',
+            'mailbox disabled',
+            'invalid recipient',
+            'invalid email',
+            'invalid address',
+            'unroutable',
+            'undeliverable',
+            'returned to sender',
+            'domain not found',
+            'user suspended',
+            'account disabled',
+            'does not exist',
+            'no mx record',
+            '550',
+            '551',
+            '552',
+            '553',
+            '554',
+            '5.1.1',
+            '5.1.2',
+            '5.2.1',
+            '5.7.1',
+        ];
+
+        foreach ($bounceKeywords as $keyword) {
+            if (str_contains($error, $keyword)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if this recipient is bounced (either by status or by error message pattern).
+     */
+    public function isBounced(): bool
+    {
+        if ($this->status === self::STATUS_BOUNCED) {
+            return true;
+        }
+
+        if ($this->status === self::STATUS_FAILED && self::isBounceError($this->error_message)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Scope to get bounced recipients (status = bounced OR status = failed with bounce error).
+     */
+    public function scopeBounced($query)
+    {
+        return $query->where(function ($q) {
+            $q->where('status', self::STATUS_BOUNCED)
+              ->orWhere(function ($q2) {
+                  $q2->where('status', self::STATUS_FAILED)
+                     ->where(function ($q3) {
+                         $q3->where('error_message', 'LIKE', '%bounce%')
+                            ->orWhere('error_message', 'LIKE', '%rejected%')
+                            ->orWhere('error_message', 'LIKE', '%550%')
+                            ->orWhere('error_message', 'LIKE', '%551%')
+                            ->orWhere('error_message', 'LIKE', '%552%')
+                            ->orWhere('error_message', 'LIKE', '%553%')
+                            ->orWhere('error_message', 'LIKE', '%554%')
+                            ->orWhere('error_message', 'LIKE', '%5.1.1%')
+                            ->orWhere('error_message', 'LIKE', '%not found%')
+                            ->orWhere('error_message', 'LIKE', '%does not exist%')
+                            ->orWhere('error_message', 'LIKE', '%unavailable%')
+                            ->orWhere('error_message', 'LIKE', '%undeliverable%')
+                            ->orWhere('error_message', 'LIKE', '%unroutable%');
+                     });
+              });
+        });
+    }
+
+    /**
+     * Scope to get failed recipients excluding bounces.
+     */
+    public function scopeFailedNonBounce($query)
+    {
+        return $query->where('status', self::STATUS_FAILED)
+            ->where(function ($q) {
+                $q->whereNull('error_message')
+                  ->orWhere(function ($q2) {
+                      $q2->where('error_message', 'NOT LIKE', '%bounce%')
+                         ->where('error_message', 'NOT LIKE', '%rejected%')
+                         ->where('error_message', 'NOT LIKE', '%550%')
+                         ->where('error_message', 'NOT LIKE', '%551%')
+                         ->where('error_message', 'NOT LIKE', '%552%')
+                         ->where('error_message', 'NOT LIKE', '%553%')
+                         ->where('error_message', 'NOT LIKE', '%554%')
+                         ->where('error_message', 'NOT LIKE', '%5.1.1%')
+                         ->where('error_message', 'NOT LIKE', '%not found%')
+                         ->where('error_message', 'NOT LIKE', '%does not exist%')
+                         ->where('error_message', 'NOT LIKE', '%unavailable%')
+                         ->where('error_message', 'NOT LIKE', '%undeliverable%')
+                         ->where('error_message', 'NOT LIKE', '%unroutable%');
+                  });
+            });
+    }
+
+    /**
      * Scope to get pending recipients for validation.
      */
     public function scopePendingValidation($query)

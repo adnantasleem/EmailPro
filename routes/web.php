@@ -36,6 +36,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/smtp/{smtp}/resume', [SmtpConfigController::class, 'resume'])->name('smtp.resume');
     Route::post('/smtp/test-connection', [SmtpConfigController::class, 'testConnection'])->name('smtp.test-connection');
     Route::post('/smtp/{smtp}/test', [SmtpConfigController::class, 'test'])->name('smtp.test');
+    Route::post('/smtp/{smtp}/test-imap', [SmtpConfigController::class, 'testImapConnection'])->name('smtp.test-imap');
 
     // Contact Lists
     Route::resource('contact-lists', ContactListController::class);

@@ -68,6 +68,13 @@ class SmtpConfig extends Model
         'auto_paused',
         'paused_at',
         'pause_reason',
+        // IMAP fields
+        'imap_host',
+        'imap_port',
+        'imap_encryption',
+        'imap_folder',
+        'bounce_check_enabled',
+        'last_bounce_check_at',
     ];
 
     protected $casts = [
@@ -97,6 +104,10 @@ class SmtpConfig extends Model
         'bounce_rate' => 'decimal:2',
         'auto_paused' => 'boolean',
         'paused_at' => 'datetime',
+        // IMAP
+        'imap_port' => 'integer',
+        'bounce_check_enabled' => 'boolean',
+        'last_bounce_check_at' => 'datetime',
     ];
 
     /**
@@ -133,6 +144,56 @@ class SmtpConfig extends Model
     public function emailLogs(): HasMany
     {
         return $this->hasMany(EmailLog::class);
+    }
+
+    // ========================================
+    // IMAP & BOUNCE MONITORING
+    // ========================================
+
+    /**
+     * Get the IMAP password (uses SMTP password).
+     */
+    public function getDecryptedImapPasswordAttribute(): string
+    {
+        return $this->decrypted_password;
+    }
+
+    /**
+     * Test the IMAP connection using current configuration.
+     * Throws an exception if connection fails.
+     */
+    public function testImapConnection(): bool
+    {
+        if (!function_exists('imap_open')) {
+            throw new \Exception('PHP IMAP extension is not installed on the server.');
+        }
+
+        $host = $this->imap_host;
+        $port = $this->imap_port ?: 993;
+        $encryption = $this->imap_encryption === 'ssl' || $this->imap_encryption === 'tls' 
+            ? '/' . $this->imap_encryption 
+            : '';
+        $folder = $this->imap_folder ?: 'INBOX';
+
+        // Format: {imap.example.com:993/imap/ssl}INBOX
+        $mailbox = "{{$host}:{$port}/imap{$encryption}}{$folder}";
+        
+        $username = $this->username;
+        $password = $this->decrypted_imap_password;
+
+        // Try to open connection (timeout after 10 seconds)
+        $inbox = @imap_open($mailbox, $username, $password, OP_HALFOPEN, 1, [
+            'DISABLE_AUTHENTICATOR' => 'PLAIN'
+        ]);
+
+        if (!$inbox) {
+            $errors = imap_errors();
+            $errorMsg = $errors ? end($errors) : 'Unknown IMAP error';
+            throw new \Exception("IMAP Connection failed: {$errorMsg}");
+        }
+
+        imap_close($inbox);
+        return true;
     }
 
     // ========================================

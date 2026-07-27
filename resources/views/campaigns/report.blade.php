@@ -64,7 +64,7 @@
             <!-- Key Metrics -->
             <div class="p-8 border-b border-gray-200">
                 <h2 class="text-xl font-bold text-gray-900 mb-6">Key Metrics</h2>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
                     <div class="bg-gray-50 p-6 rounded-lg border border-gray-100 text-center">
                         <p class="text-3xl font-bold text-gray-900">{{ $stats['total'] }}</p>
                         <p class="text-sm text-gray-500 font-medium mt-1">Total Recipients</p>
@@ -79,7 +79,11 @@
                     </div>
                     <div class="bg-red-50 p-6 rounded-lg border border-red-100 text-center">
                         <p class="text-3xl font-bold text-red-700">{{ $stats['failed'] }}</p>
-                        <p class="text-sm text-red-500 font-medium mt-1">Failed Deliveries</p>
+                        <p class="text-sm text-red-500 font-medium mt-1">System Failures</p>
+                    </div>
+                    <div class="bg-orange-50 p-6 rounded-lg border border-orange-100 text-center">
+                        <p class="text-3xl font-bold text-orange-600">{{ $stats['bounced'] ?? 0 }}</p>
+                        <p class="text-sm text-orange-500 font-medium mt-1">Bounced Deliveries</p>
                     </div>
                 </div>
                 
