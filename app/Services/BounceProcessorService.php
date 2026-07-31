@@ -168,11 +168,33 @@ class BounceProcessorService
         }
         
         // 5. Check To header in the attached original message (often prefixed with > or in a specific block)
-        // This is a bit fragile, so we only do it if the address is explicitly marked as To:
         if (preg_match('/^To:\s*.*?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/im', $body, $matches)) {
-             // Let's make sure this To is likely from the bounced message, not the bounce wrapper
              $email = trim($matches[1]);
              if (filter_var($email, FILTER_VALIDATE_EMAIL)) return strtolower($email);
+        }
+
+        // 6. AGGRESSIVE CATCH-ALL FALLBACK
+        // Especially useful for forwarded bounces (Fwd: ) where original headers are destroyed.
+        // We find all emails in the body, and return the first one that exists in the DB 
+        // as a 'sent' or 'failed' recipient for this user.
+        if (preg_match_all('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/', $body, $matches)) {
+            $foundEmails = array_unique($matches[0]);
+            
+            foreach ($foundEmails as $email) {
+                $email = strtolower(trim($email));
+                if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    
+                    // Check if this email actually exists in the database as a recipient that was sent to
+                    // This filters out the sender's own email, postmaster emails, etc.
+                    $exists = \App\Models\Recipient::where('email', $email)
+                        ->whereIn('status', [\App\Models\Recipient::STATUS_SENT, \App\Models\Recipient::STATUS_FAILED])
+                        ->exists();
+                        
+                    if ($exists) {
+                        return $email;
+                    }
+                }
+            }
         }
 
         return null;

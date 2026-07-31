@@ -120,7 +120,7 @@
             </div>
 
             <!-- Stats Overview -->
-            <div class="flex overflow-x-auto pb-2 mb-6" style="margin: 0 -0.4rem;">
+            <div class="flex overflow-x-auto pb-2 mb-6">
                 
                 <div class="flex-1" style="min-width: 95px; padding: 0 0.4rem;">
                     <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100 text-center flex flex-col justify-center h-full">
