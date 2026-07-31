@@ -382,9 +382,8 @@ class EmailValidatorService
         }
 
         try {
-            $response = \Illuminate\Support\Facades\Http::withHeaders([
-                'Authorization' => "Bearer {$key}",
-            ])->timeout(30)->get($url, [
+            $response = \Illuminate\Support\Facades\Http::timeout(30)->get($url, [
+                'api_key' => $key,
                 'email' => $email,
             ]);
 
