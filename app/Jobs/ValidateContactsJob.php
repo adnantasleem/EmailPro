@@ -68,12 +68,34 @@ class ValidateContactsJob implements ShouldQueue
             $contactIds = $contacts->pluck('id')->toArray();
             Contact::whereIn('id', $contactIds)->update(['validation_status' => Contact::STATUS_VALIDATING]);
 
+            // Pre-fetch cached results for this batch
+            $emails = $contacts->pluck('email')->map(fn($e) => strtolower($e))->toArray();
+            $cachedEmails = \App\Models\GlobalEmailCache::whereIn('email', $emails)->get()->keyBy('email');
+
             foreach ($contacts as $contact) {
                 $contact->refresh();
                 $email = strtolower($contact->email);
 
-                // Call the Third-Party API directly
-                $mailboxResult = $validator->verifyWithThirdPartyApi($email);
+                if ($cachedEmails->has($email)) {
+                    $cached = $cachedEmails->get($email);
+                    $mailboxResult = [
+                        'status' => $cached->status,
+                        'reason' => $cached->reason,
+                    ];
+                } else {
+                    // Call the Third-Party API directly
+                    $mailboxResult = $validator->verifyWithThirdPartyApi($email);
+                    
+                    // Save to cache if successful
+                    if (in_array($mailboxResult['status'], ['valid', 'invalid', 'risky', 'unknown'])) {
+                        \App\Models\GlobalEmailCache::create([
+                            'email' => $email,
+                            'status' => $mailboxResult['status'],
+                            'reason' => $mailboxResult['reason'] ?? null,
+                        ]);
+                    }
+                }
+                
                 $validated++;
 
                 if ($mailboxResult['status'] === 'valid') {
