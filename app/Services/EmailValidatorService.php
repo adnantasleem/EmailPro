@@ -365,18 +365,6 @@ class EmailValidatorService
         return $this->domainTypos;
     }
 
-    /**
-     * Domains that block SMTP verification - skip mailbox check for these.
-     */
-    protected array $skipSmtpVerification = [
-        'gmail.com', 'googlemail.com',
-        'yahoo.com', 'yahoo.co.uk', 'yahoo.fr', 'yahoo.de', 'yahoo.it', 'yahoo.es',
-        'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
-        'icloud.com', 'me.com', 'mac.com',
-        'aol.com',
-        'protonmail.com', 'proton.me',
-        'zoho.com',
-    ];
 
     /**
      * Check if mailbox exists using SMTP RCPT TO verification.
@@ -385,43 +373,48 @@ class EmailValidatorService
      */
     protected function checkMailboxExists(string $email, string $domain): array
     {
-        // Skip verification for major providers that block it
-        if (in_array(strtolower($domain), $this->skipSmtpVerification)) {
-            return ['exists' => null, 'reason' => 'Skipped - major provider'];
+        // Use the Python Verifier API instead of slow native SMTP checks
+        $url = config('services.email_verifier.url');
+        $key = config('services.email_verifier.key');
+
+        if (!$url) {
+            return ['exists' => null, 'reason' => 'Email verifier API not configured'];
         }
 
-        // Get MX records
-        $mxhosts = [];
-        $weights = [];
-        if (!@getmxrr($domain, $mxhosts, $weights)) {
-            return ['exists' => null, 'reason' => 'Could not get MX records'];
-        }
+        try {
+            $response = \Illuminate\Support\Facades\Http::withHeaders([
+                'Authorization' => "Bearer {$key}",
+            ])->timeout(30)->get($url, [
+                'email' => $email,
+            ]);
 
-        // Check if domain uses Google Workspace (Google MX servers)
-        // Google MX records contain: aspmx.l.google.com, googlemail.com, etc.
-        foreach ($mxhosts as $mxhost) {
-            $mxLower = strtolower($mxhost);
-            if (str_contains($mxLower, 'google.com') || str_contains($mxLower, 'googlemail.com')) {
-                return ['exists' => null, 'reason' => 'Skipped - Google Workspace domain'];
+            if ($response->successful()) {
+                $data = $response->json();
+                $status = $data['status'] ?? 'unknown';
+                $reason = $data['reason'] ?? 'API response ok';
+
+                if ($status === 'valid') {
+                    return ['status' => 'valid', 'exists' => true, 'reason' => $reason];
+                } elseif ($status === 'invalid') {
+                    return ['status' => 'invalid', 'exists' => false, 'reason' => $reason];
+                } else {
+                    return ['status' => $status, 'exists' => null, 'reason' => $reason];
+                }
             }
-            // Also skip Microsoft 365 domains
-            if (str_contains($mxLower, 'outlook.com') || str_contains($mxLower, 'protection.outlook.com')) {
-                return ['exists' => null, 'reason' => 'Skipped - Microsoft 365 domain'];
-            }
+
+            return ['status' => 'error', 'exists' => null, 'reason' => 'API returned error: ' . $response->status()];
+        } catch (\Exception $e) {
+            return ['status' => 'error', 'exists' => null, 'reason' => 'API connection failed: ' . $e->getMessage()];
         }
+    }
 
-        // Sort by priority (lower weight = higher priority)
-        array_multisort($weights, SORT_ASC, $mxhosts);
-
-        // Try each MX host
-        foreach ($mxhosts as $mxhost) {
-            $result = $this->smtpVerify($email, $mxhost);
-            if ($result['checked']) {
-                return $result;
-            }
-        }
-
-        return ['exists' => null, 'reason' => 'Could not connect to mail server'];
+    /**
+     * Verify email directly via the configured third-party API.
+     */
+    public function verifyWithThirdPartyApi(string $email): array
+    {
+        $domain = substr(strrchr($email, '@'), 1);
+        return $this->checkMailboxExists($email, $domain);
     }
 
     /**

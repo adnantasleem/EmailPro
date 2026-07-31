@@ -46,7 +46,6 @@ class ValidateContactsJob implements ShouldQueue
         $valid = 0;
         $invalid = 0;
         $skipped = 0;
-        $noDns = 0;
 
         // Process pending contacts in batches
         while (true) {
@@ -72,89 +71,48 @@ class ValidateContactsJob implements ShouldQueue
             foreach ($contacts as $contact) {
                 $contact->refresh();
                 $email = strtolower($contact->email);
-                $domain = substr(strrchr($email, '@'), 1);
 
-                // Step 1: DNS/MX record check
-                $hasMx = false;
-                $mxhosts = [];
-                if (@getmxrr($domain, $mxhosts)) {
-                    $hasMx = count($mxhosts) > 0;
-                }
-                if (!$hasMx) {
-                    // Check A record as fallback
-                    $hasMx = @dns_get_record($domain, DNS_A) ? true : false;
-                }
-                
-                if (!$hasMx) {
-                    $contact->markAsInvalid([
-                        'dns_verified' => false,
-                    ], 'Domain has no mail server (MX records)');
-                    $noDns++;
-                    $validated++;
-                    continue;
-                }
-
-                // Step 2: Typo detection
-                $typoCheck = $validator->getKnownTypos();
-                if (isset($typoCheck[$domain])) {
-                    $contact->markAsInvalid([
-                        'typo_detected' => true,
-                        'suggested_domain' => $typoCheck[$domain],
-                    ], "Typo detected. Did you mean: {$typoCheck[$domain]}?");
-                    $invalid++;
-                    $validated++;
-                    continue;
-                }
-
-                // Step 3: SMTP mailbox check
-                $mailboxResult = $this->checkMailbox($validator, $email, $domain);
+                // Call the Third-Party API directly
+                $mailboxResult = $validator->verifyWithThirdPartyApi($email);
                 $validated++;
 
-                if ($mailboxResult['exists'] === true) {
+                if ($mailboxResult['status'] === 'valid') {
                     // Mailbox verified
                     $contact->markAsValid([
-                        'dns_verified' => true,
-                        'mailbox_verified' => true,
-                        'verification_method' => 'smtp',
+                        'verification_method' => 'third_party_api',
+                        'note' => $mailboxResult['reason'] ?? null,
                     ]);
                     $valid++;
-                } elseif ($mailboxResult['exists'] === false) {
-                    // Mailbox doesn't exist
+                } elseif ($mailboxResult['status'] === 'invalid') {
+                    // Mailbox doesn't exist or is invalid
                     $contact->markAsInvalid([
-                        'dns_verified' => true,
-                        'mailbox_verified' => false,
-                        'verification_method' => 'smtp',
-                    ], $mailboxResult['reason'] ?? 'Mailbox does not exist');
+                        'verification_method' => 'third_party_api',
+                    ], $mailboxResult['reason'] ?? 'Invalid email');
                     $invalid++;
-                } else {
-                    // Inconclusive (null) - mark as valid (give benefit of doubt)
+                } elseif (in_array($mailboxResult['status'], ['risky', 'unknown'])) {
+                    // Risky or unknown emails shouldn't be retried indefinitely
                     $contact->markAsValid([
-                        'dns_verified' => true,
-                        'mailbox_verified' => null,
-                        'verification_method' => 'skipped',
-                        'reason' => $mailboxResult['reason'] ?? 'SMTP check skipped or inconclusive',
+                        'verification_method' => 'third_party_api',
+                        'risky' => true,
+                        'api_status' => $mailboxResult['status'],
+                        'note' => $mailboxResult['reason'] ?? 'Risky / Unknown',
+                    ]);
+                    $valid++;
+                } else {
+                    // Error (like connection failed) - Mark back as pending so it retries later
+                    $contact->update([
+                        'validation_status' => Contact::STATUS_PENDING,
+                        'validation_result' => [
+                            'reason' => $mailboxResult['reason'] ?? 'API connection failed, will retry',
+                        ],
+                        'validation_error' => 'Temporarily skipped',
                     ]);
                     $skipped++;
                 }
             }
         }
 
-        Log::info("ValidateContactsJob: List {$this->contactList->id} - Verified: {$validated}, Valid: {$valid}, Invalid: {$invalid}, No DNS: {$noDns}, Skipped: {$skipped}");
-    }
-
-    /**
-     * Check mailbox using SMTP verification.
-     */
-    protected function checkMailbox(EmailValidatorService $validator, string $email, string $domain): array
-    {
-        // Use reflection to access protected method, or we add a public method
-        // For now, let's use the validateEmail method and extract mailbox_exists
-        $result = $validator->validateEmail($email);
-        
-        return [
-            'exists' => $result['mailbox_exists'] ?? null,
-            'reason' => $result['reason'] ?? null,
-        ];
+        Log::info("ValidateContactsJob: List {$this->contactList->id} - Verified: {$validated}, Valid: {$valid}, Invalid: {$invalid}, Skipped: {$skipped}");
     }
 
     /**
