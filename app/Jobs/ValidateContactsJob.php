@@ -105,9 +105,9 @@ class ValidateContactsJob implements ShouldQueue
                         'note' => $mailboxResult['reason'] ?? null,
                     ]);
                     $valid++;
-                } elseif (in_array($mailboxResult['status'], ['invalid', 'risky', 'unknown'])) {
-                    if ($mailboxResult['status'] === 'invalid') {
-                        // Mailbox doesn't exist or is definitely invalid
+                } elseif (in_array($mailboxResult['status'], ['invalid', 'risky', 'unknown', 'timeout'])) {
+                    if (in_array($mailboxResult['status'], ['invalid', 'timeout'])) {
+                        // Mailbox doesn't exist, is definitely invalid, or connection repeatedly timed out
                         $contact->markAsInvalid([
                             'verification_method' => 'third_party_api',
                             'api_status' => $mailboxResult['status'],
