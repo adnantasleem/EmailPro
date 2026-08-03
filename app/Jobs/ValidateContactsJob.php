@@ -87,7 +87,7 @@ class ValidateContactsJob implements ShouldQueue
                     $mailboxResult = $validator->verifyWithThirdPartyApi($email);
                     
                     // Save to cache if successful
-                    if (in_array($mailboxResult['status'], ['valid', 'invalid', 'risky', 'unknown'])) {
+                    if (in_array($mailboxResult['status'], ['valid', 'invalid'])) {
                         \App\Models\GlobalEmailCache::create([
                             'email' => $email,
                             'status' => $mailboxResult['status'],
@@ -105,21 +105,13 @@ class ValidateContactsJob implements ShouldQueue
                         'note' => $mailboxResult['reason'] ?? null,
                     ]);
                     $valid++;
-                } elseif ($mailboxResult['status'] === 'invalid') {
-                    // Mailbox doesn't exist or is invalid
+                } elseif (in_array($mailboxResult['status'], ['invalid', 'risky', 'unknown'])) {
+                    // Mailbox doesn't exist, is invalid, risky, or unknown
                     $contact->markAsInvalid([
                         'verification_method' => 'third_party_api',
-                    ], $mailboxResult['reason'] ?? 'Invalid email');
-                    $invalid++;
-                } elseif (in_array($mailboxResult['status'], ['risky', 'unknown'])) {
-                    // Risky or unknown emails shouldn't be retried indefinitely
-                    $contact->markAsValid([
-                        'verification_method' => 'third_party_api',
-                        'risky' => true,
                         'api_status' => $mailboxResult['status'],
-                        'note' => $mailboxResult['reason'] ?? 'Risky / Unknown',
-                    ]);
-                    $valid++;
+                    ], $mailboxResult['reason'] ?? 'Invalid / Risky email');
+                    $invalid++;
                 } else {
                     // Error (like connection failed) - Mark back as pending so it retries later
                     $contact->update([
