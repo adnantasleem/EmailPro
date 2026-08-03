@@ -106,12 +106,38 @@ class ValidateContactsJob implements ShouldQueue
                     ]);
                     $valid++;
                 } elseif (in_array($mailboxResult['status'], ['invalid', 'risky', 'unknown'])) {
-                    // Mailbox doesn't exist, is invalid, risky, or unknown
-                    $contact->markAsInvalid([
-                        'verification_method' => 'third_party_api',
-                        'api_status' => $mailboxResult['status'],
-                    ], $mailboxResult['reason'] ?? 'Invalid / Risky email');
-                    $invalid++;
+                    if ($mailboxResult['status'] === 'invalid') {
+                        // Mailbox doesn't exist or is definitely invalid
+                        $contact->markAsInvalid([
+                            'verification_method' => 'third_party_api',
+                            'api_status' => $mailboxResult['status'],
+                        ], $mailboxResult['reason'] ?? 'Invalid email');
+                        $invalid++;
+                    } else {
+                        // It is risky or unknown. Give it ONE retry to bypass greylisting.
+                        $result = $contact->validation_result ?? [];
+                        $retries = $result['retry_count'] ?? 0;
+
+                        if ($retries < 1) {
+                            $result['retry_count'] = $retries + 1;
+                            $result['reason'] = $mailboxResult['reason'] ?? 'Risky API status, will retry';
+                            
+                            $contact->update([
+                                'validation_status' => Contact::STATUS_PENDING,
+                                'validation_result' => $result,
+                                'validation_error' => 'Temporarily skipped (risky)',
+                            ]);
+                            $skipped++;
+                        } else {
+                            // Tried again and it is still risky. Mark as definitively invalid.
+                            $contact->markAsInvalid([
+                                'verification_method' => 'third_party_api',
+                                'api_status' => $mailboxResult['status'],
+                                'retry_count' => $retries,
+                            ], $mailboxResult['reason'] ?? 'Invalid / Risky email');
+                            $invalid++;
+                        }
+                    }
                 } else {
                     // Error (like connection failed) - Mark back as pending so it retries later
                     $contact->update([
