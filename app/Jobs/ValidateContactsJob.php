@@ -68,33 +68,48 @@ class ValidateContactsJob implements ShouldQueue
             $contactIds = $contacts->pluck('id')->toArray();
             Contact::whereIn('id', $contactIds)->update(['validation_status' => Contact::STATUS_VALIDATING]);
 
-            // Pre-fetch cached results for this batch
+            // Pre-fetch cached results and blocklist for this batch
             $emails = $contacts->pluck('email')->map(fn($e) => strtolower($e))->toArray();
+            
             $cachedEmails = \App\Models\GlobalEmailCache::whereIn('email', $emails)->get()->keyBy('email');
+            
+            $blocklistedEmails = \App\Models\InvalidEmail::where('user_id', $this->contactList->user_id)
+                ->whereIn('email', $emails)
+                ->get()
+                ->keyBy('email');
 
             foreach ($contacts as $contact) {
                 $contact->refresh();
                 $email = strtolower($contact->email);
 
-                // 1. Lightning Fast Local Pre-check (Syntax & Typo)
-                $precheck = $validator->quickPrecheck($email);
-                
-                if ($precheck !== false) {
-                    // It failed the quick local precheck
+                // 1. Check if email is in the user's personal blocklist
+                if ($blocklistedEmails->has($email)) {
                     $mailboxResult = [
-                        'status' => $precheck['status'],
-                        'reason' => $precheck['reason'],
-                    ];
-                } elseif ($cachedEmails->has($email)) {
-                    // 2. Check Database Cache
-                    $cached = $cachedEmails->get($email);
-                    $mailboxResult = [
-                        'status' => $cached->status,
-                        'reason' => $cached->reason,
+                        'status' => 'invalid',
+                        'reason' => 'Blocklisted: ' . ($blocklistedEmails->get($email)->reason ?? 'User blocklist'),
                     ];
                 } else {
-                    // 3. Call the Third-Party API directly
-                    $mailboxResult = $validator->verifyWithThirdPartyApi($email);
+                    // 2. Lightning Fast Local Pre-check (Syntax & Typo & Role-based & Disposable)
+                    $precheck = $validator->quickPrecheck($email);
+                    
+                    if ($precheck !== false) {
+                        // It failed the quick local precheck
+                        $mailboxResult = [
+                            'status' => $precheck['status'],
+                            'reason' => $precheck['reason'],
+                        ];
+                    } elseif ($cachedEmails->has($email)) {
+                        // 3. Check Global Database Cache
+                        $cached = $cachedEmails->get($email);
+                        $mailboxResult = [
+                            'status' => $cached->status,
+                            'reason' => $cached->reason,
+                        ];
+                    } else {
+                        // 4. Call the Third-Party API directly
+                        $mailboxResult = $validator->verifyWithThirdPartyApi($email);
+                    }
+                }
                     
                     // Save to cache if successful
                     if (in_array($mailboxResult['status'], ['valid', 'invalid', 'risky', 'unknown'])) {
