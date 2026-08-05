@@ -99,44 +99,75 @@ class BounceProcessorService
     }
 
     /**
-     * Determine if an email is a bounce/NDR.
-     */
-    protected function isBounceEmail($headerInfo, string $header, string $body): bool
-    {
-        // 1. Check if it's a Delivery Status Notification (RFC 3464)
-        if (stripos($header, 'Content-Type: multipart/report') !== false && 
-            stripos($header, 'report-type=delivery-status') !== false) {
+ * Determine if an email is a bounce/NDR.
+ */
+protected function isBounceEmail($headerInfo, string $header, string $body): bool
+{
+    // --- STRONG SIGNAL 1: RFC 3464 Delivery Status Notification ---
+    // This is a protocol-level fact, not a guess based on wording — highest confidence.
+    if (stripos($header, 'multipart/report') !== false &&
+        stripos($header, 'report-type=delivery-status') !== false) {
+        return true;
+    }
+
+    // Loosened variant: some servers put report-type in a MIME boundary further
+    // down rather than the top header block, or format it with spaces.
+    if (stripos($header, 'multipart/report') !== false &&
+        preg_match('/report-type\s*=\s*delivery-status/i', $body)) {
+        return true;
+    }
+
+    // --- STRONG SIGNAL 2: Sender is a known mail daemon ---
+    // Real people don't send from these addresses — very reliable.
+    if (isset($headerInfo->from[0])) {
+        $fromAddress = strtolower($headerInfo->from[0]->mailbox ?? '');
+        $daemonNames = [
+            'mailer-daemon',
+            'postmaster',
+            'mail-daemon',
+            'mailerdaemon',
+            'mail delivery subsystem',
+            'no-reply',
+            'noreply',
+        ];
+        if (in_array($fromAddress, $daemonNames)) {
             return true;
         }
-
-        // 2. Check From address for common daemon names
-        if (isset($headerInfo->from[0])) {
-            $fromAddress = strtolower($headerInfo->from[0]->mailbox);
-            if (in_array($fromAddress, ['mailer-daemon', 'postmaster', 'mail-daemon'])) {
-                return true;
-            }
-        }
-
-        // 3. Check Subject for common bounce phrases
-        $subject = strtolower($headerInfo->subject ?? '');
-        $bounceSubjects = [
-            'undeliverable',
-            'returned mail',
-            'delivery status notification (failure)',
-            'delivery failed',
-            'failure notice',
-            'mail delivery failed',
-            'undelivered mail returned to sender'
-        ];
-
-        foreach ($bounceSubjects as $bounceSubj) {
-            if (str_contains($subject, $bounceSubj)) {
-                return true;
-            }
-        }
-
-        return false;
     }
+
+    // --- WEAKER SIGNAL: Subject phrase match ---
+    // Used as a fallback only when the two strong signals above don't fire.
+    // Full phrases only — never bare words like "deliver" or "delivery",
+    // since those match legitimate emails (shipping confirmations, deliverables, etc.)
+    $subject = strtolower($headerInfo->subject ?? '');
+
+    $bounceSubjectPhrases = [
+        'undeliverable',
+        'undelivered mail returned to sender',
+        'returned mail',
+        'returned to sender',
+        'delivery status notification (failure)',
+        'delivery status notification (delay)',
+        'delivery failed',
+        'delivery failure',
+        'permanent delivery failure',
+        'delivery incomplete',
+        'message not delivered',
+        'mail delivery failed',
+        'mail delivery system',
+        'failure notice',
+        'address not found',
+        'recipient address rejected',
+    ];
+
+    foreach ($bounceSubjectPhrases as $phrase) {
+        if (str_contains($subject, $phrase)) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
     /**
      * Extract the original intended recipient from the bounce message.

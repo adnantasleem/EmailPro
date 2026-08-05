@@ -12,12 +12,8 @@ class EmailValidatorService
      * List of role-based email prefixes that often have delivery issues.
      */
     protected array $roleBasedPrefixes = [
-        'info', 'admin', 'administrator', 'support', 'help', 'contact',
-        'sales', 'marketing', 'billing', 'accounts', 'noreply', 'no-reply',
-        'no_reply', 'donotreply', 'do-not-reply', 'webmaster', 'postmaster',
+       'noreply', 'no-reply','no_reply', 'donotreply', 'do-not-reply', 'webmaster', 'postmaster',
         'hostmaster', 'abuse', 'spam', 'security', 'privacy', 'legal',
-        'hr', 'jobs', 'careers', 'recruitment', 'office', 'hello',
-        'team', 'enquiries', 'enquiry', 'feedback', 'mail', 'email',
     ];
 
     /**

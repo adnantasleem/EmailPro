@@ -16,7 +16,7 @@ class SmtpConfig extends Model
     /**
      * Maximum bounce rate before auto-pause (5%).
      */
-    const MAX_BOUNCE_RATE = 5.0;
+    const MAX_BOUNCE_RATE = 100.0;
 
     /**
      * Warmup schedule: day range => daily limit
@@ -542,13 +542,13 @@ class SmtpConfig extends Model
     protected function checkAndAutoPause(): void
     {
         // Check hourly bounce rate if we've sent at least 5 emails
-        if ($this->sent_last_hour >= 5 && $this->bounce_rate > self::MAX_BOUNCE_RATE) {
+        if ($this->sent_last_hour >= 10 && $this->bounce_rate > self::MAX_BOUNCE_RATE) {
             $this->autoPause("Hourly bounce rate {$this->bounce_rate}% exceeds " . self::MAX_BOUNCE_RATE . "%");
             return;
         }
 
         // Also check overall bounce rate if we've sent at least 20 emails total
-        if ($this->total_sent >= 20) {
+        if ($this->total_sent >= 50) {
             $overallRate = $this->overall_bounce_rate;
             if ($overallRate > self::MAX_BOUNCE_RATE) {
                 $this->autoPause("Overall bounce rate {$overallRate}% exceeds " . self::MAX_BOUNCE_RATE . "%");
