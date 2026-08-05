@@ -11,12 +11,23 @@ class SmtpConfigController extends Controller
     /**
      * Display a listing of SMTP configs.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $smtpConfigs = SmtpConfig::where('user_id', auth()->id())
-            ->latest()
-            ->get()
-            ->map(function ($smtp) {
+        $query = SmtpConfig::where('user_id', auth()->id())->latest();
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('host', 'like', "%{$search}%")
+                  ->orWhere('from_email', 'like', "%{$search}%")
+                  ->orWhere('from_name', 'like', "%{$search}%");
+            });
+        }
+
+        $paginator = $query->paginate(25)->withQueryString();
+
+        $smtpConfigs = $paginator->getCollection()->map(function ($smtp) {
             return [
                 'id' => $smtp->id,
                 'name' => $smtp->name,
@@ -43,10 +54,13 @@ class SmtpConfigController extends Controller
                 'created_at' => $smtp->created_at->format('M d, Y'),
             ];
         });
+        // Replace the collection with our mapped items so the view can iterate over them normally
+        $paginator->setCollection($smtpConfigs);
+        // Pass $paginator to the view instead of $smtpConfigs so it can render links()
+        $smtpConfigs = $paginator;
 
         return view('smtp.index', compact('smtpConfigs'));
     }
-
     /**
      * Show the form for creating a new SMTP config.
      */

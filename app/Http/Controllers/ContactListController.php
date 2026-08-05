@@ -13,12 +13,21 @@ class ContactListController extends Controller
     /**
      * Display a listing of contact lists.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $contactLists = ContactList::where('user_id', auth()->id())
+        $query = ContactList::where('user_id', auth()->id())
             ->withCount('contacts')
-            ->latest()
-            ->get();
+            ->latest();
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+            });
+        }
+
+        $contactLists = $query->paginate(25)->withQueryString();
 
         return view('contact-lists.index', compact('contactLists'));
     }

@@ -15,12 +15,18 @@ class CampaignController extends Controller
     /**
      * Display a listing of campaigns.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $campaigns = Campaign::where('user_id', auth()->id())
-            ->latest()
-            ->get()
-            ->map(function ($campaign) {
+        $query = Campaign::where('user_id', auth()->id())->latest();
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where('name', 'like', "%{$search}%");
+        }
+
+        $paginator = $query->paginate(25)->withQueryString();
+
+        $campaigns = $paginator->getCollection()->map(function ($campaign) {
             return [
                 'id' => $campaign->id,
                 'name' => $campaign->name,
@@ -32,6 +38,11 @@ class CampaignController extends Controller
                 'created_at' => $campaign->created_at->format('M d, Y'),
             ];
         });
+
+        // Replace the collection with our mapped items so the view can iterate over them normally
+        $paginator->setCollection($campaigns);
+        // Pass $paginator to the view instead of $campaigns so it can render links()
+        $campaigns = $paginator;
 
         return view('campaigns.index', compact('campaigns'));
     }

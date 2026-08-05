@@ -11,12 +11,18 @@ class BodyGroupController extends Controller
     /**
      * Display a listing of body groups.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $groups = BodyGroup::where('user_id', auth()->id())
+        $query = BodyGroup::where('user_id', auth()->id())
             ->withCount('bodyTemplates')
-            ->latest()
-            ->get();
+            ->latest();
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where('name', 'like', "%{$search}%");
+        }
+
+        $groups = $query->paginate(25)->withQueryString();
 
         return view('body-groups.index', compact('groups'));
     }

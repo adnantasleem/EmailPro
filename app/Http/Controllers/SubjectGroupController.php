@@ -11,12 +11,18 @@ class SubjectGroupController extends Controller
     /**
      * Display a listing of subject groups.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $groups = SubjectGroup::where('user_id', auth()->id())
+        $query = SubjectGroup::where('user_id', auth()->id())
             ->withCount('subjectLines')
-            ->latest()
-            ->get();
+            ->latest();
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where('name', 'like', "%{$search}%");
+        }
+
+        $groups = $query->paginate(25)->withQueryString();
 
         return view('subject-groups.index', compact('groups'));
     }
