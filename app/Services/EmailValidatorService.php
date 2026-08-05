@@ -241,6 +241,32 @@ class EmailValidatorService
     }
 
     /**
+     * Perform a lightning-fast local precheck (syntax and typos) before hitting API/Cache.
+     * Returns an array with status/reason if it fails, or false if it passes the precheck.
+     */
+    public function quickPrecheck(string $email): array|false
+    {
+        $email = strtolower(trim($email));
+
+        // 1. Syntax
+        if (!$this->validateSyntax($email)) {
+            return ['status' => 'invalid', 'reason' => 'Invalid email syntax'];
+        }
+
+        // 2. Extract domain
+        $domain = $this->extractDomain($email);
+
+        // 3. Typo
+        $typoResult = $this->checkForTypo($domain);
+        if ($typoResult !== false) {
+            $localPart = $this->extractLocalPart($email);
+            return ['status' => 'invalid', 'reason' => "Domain typo detected. Did you mean: {$localPart}@{$typoResult}?"];
+        }
+
+        return false; // Passed all quick local checks!
+    }
+
+    /**
      * Validate email syntax using filter_var.
      */
     protected function validateSyntax(string $email): bool

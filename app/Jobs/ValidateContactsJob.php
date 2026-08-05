@@ -76,14 +76,24 @@ class ValidateContactsJob implements ShouldQueue
                 $contact->refresh();
                 $email = strtolower($contact->email);
 
-                if ($cachedEmails->has($email)) {
+                // 1. Lightning Fast Local Pre-check (Syntax & Typo)
+                $precheck = $validator->quickPrecheck($email);
+                
+                if ($precheck !== false) {
+                    // It failed the quick local precheck
+                    $mailboxResult = [
+                        'status' => $precheck['status'],
+                        'reason' => $precheck['reason'],
+                    ];
+                } elseif ($cachedEmails->has($email)) {
+                    // 2. Check Database Cache
                     $cached = $cachedEmails->get($email);
                     $mailboxResult = [
                         'status' => $cached->status,
                         'reason' => $cached->reason,
                     ];
                 } else {
-                    // Call the Third-Party API directly
+                    // 3. Call the Third-Party API directly
                     $mailboxResult = $validator->verifyWithThirdPartyApi($email);
                     
                     // Save to cache if successful
