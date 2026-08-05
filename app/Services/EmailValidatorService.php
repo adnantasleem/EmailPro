@@ -253,13 +253,23 @@ class EmailValidatorService
             return ['status' => 'invalid', 'reason' => 'Invalid email syntax'];
         }
 
-        // 2. Extract domain
+        // 2. Extract domain & local part
         $domain = $this->extractDomain($email);
+        $localPart = $this->extractLocalPart($email);
 
-        // 3. Typo
+        // 3. Disposable Domain
+        if ($this->isDisposable($email)) {
+            return ['status' => 'invalid', 'reason' => 'Disposable email domain'];
+        }
+
+        // 4. Role Based Email
+        if ($this->isRoleBased($localPart)) {
+            return ['status' => 'invalid', 'reason' => 'Role-based email address'];
+        }
+
+        // 5. Typo
         $typoResult = $this->checkForTypo($domain);
         if ($typoResult !== false) {
-            $localPart = $this->extractLocalPart($email);
             return ['status' => 'invalid', 'reason' => "Domain typo detected. Did you mean: {$localPart}@{$typoResult}?"];
         }
 
