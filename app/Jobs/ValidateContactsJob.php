@@ -119,7 +119,6 @@ class ValidateContactsJob implements ShouldQueue
                             'reason' => $mailboxResult['reason'] ?? null,
                         ]);
                     }
-                }
                 
                 $validated++;
 
