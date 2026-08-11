@@ -78,7 +78,17 @@ class ValidateContactsJob implements ShouldQueue
                 ->get()
                 ->keyBy('email');
 
-            foreach ($contacts as $contact) {
+            foreach ($contacts as $key => $contact) {
+                // Check if we're running out of time during a slow batch
+                if ($this->isTimeExceeded()) {
+                    $remainingIds = $contacts->slice($key)->pluck('id')->toArray();
+                    if (!empty($remainingIds)) {
+                        Contact::whereIn('id', $remainingIds)->update(['validation_status' => Contact::STATUS_PENDING]);
+                    }
+                    Log::info("ValidateContactsJob: Time limit reached inside batch for list {$this->contactList->id}. Reverted " . count($remainingIds) . " unprocessed contacts to pending.");
+                    break 2; // Break out of foreach and while loop
+                }
+
                 $contact->refresh();
                 $email = strtolower($contact->email);
 
