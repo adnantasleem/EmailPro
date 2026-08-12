@@ -21,7 +21,7 @@ class ValidateContactsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    protected int $batchSize = 20; // Smaller batch for slow SMTP checks
+    protected int $batchSize = 5; // Smaller batch for slow SMTP checks
     protected int $maxExecutionTime = 50; // Max seconds to run (cron is 55s, leave buffer)
     protected float $startTime;
 
