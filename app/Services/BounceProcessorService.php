@@ -15,13 +15,9 @@ class BounceProcessorService
      */
     public function processBounces(SmtpConfig $smtp): int
     {
-        if (!function_exists('imap_open')) {
-            Log::error("BounceProcessorService: PHP IMAP extension not installed. Cannot process bounces for SMTP {$smtp->id}.");
-            return 0;
-        }
-
         try {
-            $inbox = $this->connectToImap($smtp);
+            $client = $this->connectToImap($smtp);
+            $client->connect();
         } catch (\Exception $e) {
             Log::error("BounceProcessorService: Failed to connect to IMAP for SMTP {$smtp->id}: " . $e->getMessage());
             return 0;
@@ -29,19 +25,26 @@ class BounceProcessorService
 
         $bouncesProcessed = 0;
         
-        // Search for UNSEEN emails
-        $emails = imap_search($inbox, 'UNSEEN');
-        
-        if ($emails) {
-            foreach ($emails as $emailNumber) {
+        try {
+            $folderName = $smtp->imap_folder ?: 'INBOX';
+            $folder = $client->getFolder($folderName);
+            
+            // Search for UNSEEN emails
+            $messages = $folder->query()->unseen()->get();
+            
+            foreach ($messages as $message) {
                 try {
-                    $headerInfo = imap_headerinfo($inbox, $emailNumber);
-                    $structure = imap_fetchstructure($inbox, $emailNumber);
-                    $header = imap_fetchheader($inbox, $emailNumber);
-                    $body = $this->getBody($inbox, $emailNumber, $structure);
+                    $headerRaw = $message->getHeader()->raw ?? '';
+                    $body = $message->hasHTMLBody() ? $message->getHTMLBody() : ($message->hasTextBody() ? $message->getTextBody() : '');
                     
-                    if ($this->isBounceEmail($headerInfo, $header, $body)) {
-                        $bouncedEmail = $this->extractBouncedAddress($header, $body);
+                    $headerInfo = new \stdClass();
+                    $headerInfo->from = [
+                        (object) ['mailbox' => $message->getFrom()[0]->mailbox ?? '']
+                    ];
+                    $headerInfo->subject = (string) $message->getSubject();
+                    
+                    if ($this->isBounceEmail($headerInfo, $headerRaw, $body)) {
+                        $bouncedEmail = $this->extractBouncedAddress($headerRaw, $body);
                         
                         if ($bouncedEmail) {
                             $this->handleBouncedAddress($smtp, $bouncedEmail);
@@ -50,15 +53,17 @@ class BounceProcessorService
                     }
                     
                     // Mark as seen so we don't process it again
-                    imap_setflag_full($inbox, $emailNumber, "\\Seen");
+                    $message->setFlag('Seen');
                     
                 } catch (\Exception $e) {
-                    Log::error("BounceProcessorService: Error processing email {$emailNumber} for SMTP {$smtp->id}: " . $e->getMessage());
+                    Log::error("BounceProcessorService: Error processing email for SMTP {$smtp->id}: " . $e->getMessage());
                 }
             }
+            
+            $client->disconnect();
+        } catch (\Exception $e) {
+            Log::error("BounceProcessorService: Error during mailbox operations for SMTP {$smtp->id}: " . $e->getMessage());
         }
-        
-        imap_close($inbox);
         
         $smtp->update(['last_bounce_check_at' => now()]);
         
@@ -70,32 +75,27 @@ class BounceProcessorService
     }
 
     /**
-     * Connect to the IMAP mailbox.
+     * Connect to the IMAP mailbox using pure PHP IMAP library.
      */
     protected function connectToImap(SmtpConfig $smtp)
     {
-        $host = $smtp->imap_host;
-        $port = $smtp->imap_port ?: 993;
         $encryption = $smtp->imap_encryption === 'ssl' || $smtp->imap_encryption === 'tls' 
-            ? '/' . $smtp->imap_encryption 
-            : '';
-        $folder = $smtp->imap_folder ?: 'INBOX';
+            ? $smtp->imap_encryption 
+            : false;
 
-        $mailbox = "{{$host}:{$port}/imap{$encryption}}{$folder}";
-        $username = $smtp->username;
-        $password = $smtp->decrypted_imap_password;
-
-        $inbox = @imap_open($mailbox, $username, $password, 0, 1, [
-            'DISABLE_AUTHENTICATOR' => 'PLAIN'
+        $cm = new \Webklex\PHPIMAP\ClientManager();
+        
+        $client = $cm->make([
+            'host'          => $smtp->imap_host,
+            'port'          => $smtp->imap_port ?: 993,
+            'encryption'    => $encryption,
+            'validate_cert' => false,
+            'username'      => $smtp->username,
+            'password'      => $smtp->decrypted_imap_password,
+            'protocol'      => 'imap'
         ]);
 
-        if (!$inbox) {
-            $errors = imap_errors();
-            $errorMsg = $errors ? end($errors) : 'Unknown IMAP error';
-            throw new \Exception($errorMsg);
-        }
-
-        return $inbox;
+        return $client;
     }
 
     /**
@@ -267,57 +267,5 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
         });
     }
 
-    /**
-     * Recursively fetch email body from IMAP structure.
-     */
-    protected function getBody($inbox, int $emailNumber, $structure, $partNumber = ""): string
-    {
-        $body = "";
-        
-        if (empty($partNumber)) {
-            $partNumber = "1";
-        }
 
-        // If no parts, it's a simple message
-        if (!isset($structure->parts) || empty($structure->parts)) {
-            // Get the whole body
-            $text = imap_fetchbody($inbox, $emailNumber, $partNumber);
-            $body .= $this->decodeBody($text, $structure->encoding ?? 0);
-            return $body;
-        }
-
-        // Multipart message
-        foreach ($structure->parts as $index => $subStruct) {
-            $prefix = $partNumber ? $partNumber . '.' : '';
-            $subPartNumber = $prefix . ($index + 1);
-
-            // We want text parts (0) or message/rfc822 parts (2) which contain the original headers
-            if ($subStruct->type == 0 || $subStruct->type == 2) {
-                $text = imap_fetchbody($inbox, $emailNumber, $subPartNumber);
-                $body .= $this->decodeBody($text, $subStruct->encoding ?? 0) . "\n\n";
-            }
-            
-            // Recursively get nested parts
-            if (isset($subStruct->parts)) {
-                 $body .= $this->getBody($inbox, $emailNumber, $subStruct, $subPartNumber);
-            }
-        }
-        
-        return $body;
-    }
-
-    /**
-     * Decode IMAP email body based on encoding.
-     */
-    protected function decodeBody(string $text, int $encoding): string
-    {
-        switch ($encoding) {
-            case 3: // BASE64
-                return imap_base64($text);
-            case 4: // QUOTED-PRINTABLE
-                return imap_qprint($text);
-            default:
-                return $text;
-        }
-    }
 }
