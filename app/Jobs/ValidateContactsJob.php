@@ -169,6 +169,14 @@ class ValidateContactsJob implements ShouldQueue
         }
 
         Log::info("ValidateContactsJob: List {$this->contactList->id} - Verified: {$validated}, Valid: {$valid}, Invalid: {$invalid}, Skipped: {$skipped}");
+
+        // Self-loop: If there are still pending contacts for this list, dispatch another job immediately
+        // This bypasses the 1-minute scheduler wait and processes the list continuously.
+        $remainingPending = $this->contactList->contacts()->pendingValidation()->count();
+        if ($remainingPending > 0) {
+            Log::info("ValidateContactsJob: List {$this->contactList->id} has {$remainingPending} contacts left. Self-dispatching next batch immediately.");
+            self::dispatch($this->contactList);
+        }
     }
 
     /**
