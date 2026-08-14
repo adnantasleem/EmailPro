@@ -57,6 +57,7 @@ class ValidateContactsJob implements ShouldQueue
 
             $contacts = $this->contactList->contacts()
                 ->pendingValidation()
+                ->oldest('updated_at')
                 ->limit($this->batchSize)
                 ->get();
 
