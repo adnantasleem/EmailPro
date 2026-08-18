@@ -258,6 +258,17 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
                 // Add to invalid emails blocklist so it's not mailed again
                 InvalidEmail::addEmail($smtp->user_id, $email, 'Hard Bounce via IMAP');
                 
+                // Also mark the contact in the user's contact lists as invalid
+                $contactsUpdated = \App\Models\Contact::whereHas('contactList', function ($q) use ($smtp) {
+                    $q->where('user_id', $smtp->user_id);
+                })
+                ->where('email', $email)
+                ->update([
+                    'validation_status' => \App\Models\Contact::STATUS_INVALID,
+                    'validation_error' => 'Hard Bounce via IMAP',
+                    'validated_at' => now(),
+                ]);
+                
                 // Record the bounce on the SMTP config for tracking limits/pausing
                 // We only count it once even if it updated multiple recipient records
                 $smtp->recordBounce();

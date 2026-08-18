@@ -139,12 +139,14 @@ class ValidateContactsJob implements ShouldQueue
                         'verification_method' => 'third_party_api',
                         'note' => $mailboxResult['reason'] ?? null,
                     ]);
+                    $this->syncValidationToActiveCampaigns($email, 'valid', ['verification_method' => 'third_party_api'], $mailboxResult['reason'] ?? null);
                     $valid++;
                 } elseif ($mailboxResult['status'] === 'invalid') {
                     // Mailbox doesn't exist or is invalid
                     $contact->markAsInvalid([
                         'verification_method' => 'third_party_api',
                     ], $mailboxResult['reason'] ?? 'Invalid email');
+                    $this->syncValidationToActiveCampaigns($email, 'invalid', ['verification_method' => 'third_party_api'], $mailboxResult['reason'] ?? 'Invalid email');
                     $invalid++;
                 } elseif (in_array($mailboxResult['status'], ['risky', 'unknown'])) {
                     // Risky or unknown emails shouldn't be retried indefinitely
@@ -154,6 +156,7 @@ class ValidateContactsJob implements ShouldQueue
                         'api_status' => $mailboxResult['status'],
                         'note' => $mailboxResult['reason'] ?? 'Risky / Unknown',
                     ]);
+                    $this->syncValidationToActiveCampaigns($email, $mailboxResult['status'], ['verification_method' => 'third_party_api', 'risky' => true], $mailboxResult['reason'] ?? 'Risky / Unknown');
                     $valid++;
                 } else {
                     // Error (like connection failed) - Mark back as pending so it retries later
@@ -194,6 +197,44 @@ class ValidateContactsJob implements ShouldQueue
     protected function isTimeExceeded(): bool
     {
         return (microtime(true) - $this->startTime) > $this->maxExecutionTime;
+    }
+
+    /**
+     * Synchronize the validation result to any active campaigns that are waiting on this email.
+     */
+    protected function syncValidationToActiveCampaigns(string $email, string $status, array $result = [], string $reason = null): void
+    {
+        if ($status === 'valid' || in_array($status, ['risky', 'unknown'])) {
+            \App\Models\Recipient::where('email', $email)
+                ->whereIn('status', [\App\Models\Recipient::STATUS_PENDING, \App\Models\Recipient::STATUS_VALIDATING])
+                ->update([
+                    'status' => \App\Models\Recipient::STATUS_VALID,
+                    'validation_result' => json_encode(array_merge($result, [
+                        'api_status' => $status,
+                        'note' => $reason
+                    ])),
+                    'validated_at' => now(),
+                ]);
+        } else {
+            // invalid, disposable, blocklisted, etc.
+            $pendingRecipients = \App\Models\Recipient::with('campaign')
+                ->where('email', $email)
+                ->whereIn('status', [\App\Models\Recipient::STATUS_PENDING, \App\Models\Recipient::STATUS_VALIDATING])
+                ->get();
+                
+            foreach ($pendingRecipients as $recipient) {
+                // Ensure campaign exists before calling markAsInvalid which depends on it
+                if ($recipient->campaign) {
+                    if ($status === 'disposable') {
+                        $recipient->markAsDisposable($result);
+                    } else {
+                        $recipient->markAsInvalid($result, $reason ?? 'Invalid email');
+                    }
+                } else {
+                    $recipient->delete();
+                }
+            }
+        }
     }
 }
 
