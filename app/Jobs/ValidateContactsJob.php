@@ -160,14 +160,29 @@ class ValidateContactsJob implements ShouldQueue
                     $valid++;
                 } else {
                     // Error (like connection failed) - Mark back as pending so it retries later
-                    $contact->update([
-                        'validation_status' => Contact::STATUS_PENDING,
-                        'validation_result' => [
-                            'reason' => $mailboxResult['reason'] ?? 'API connection failed, will retry',
-                        ],
-                        'validation_error' => 'Temporarily skipped',
-                    ]);
-                    $skipped++;
+                    $attempts = ($contact->validation_result['attempts'] ?? 0) + 1;
+                    
+                    if ($attempts >= 3) {
+                        // Stop retrying after 3 failed attempts to connect
+                        $contact->markAsValid([
+                            'verification_method' => 'third_party_api',
+                            'risky' => true,
+                            'api_status' => 'unknown',
+                            'note' => 'Max connection retries exceeded (' . ($mailboxResult['reason'] ?? 'Connection failed') . ')',
+                        ]);
+                        $this->syncValidationToActiveCampaigns($email, 'unknown', ['verification_method' => 'third_party_api', 'risky' => true], 'Max connection retries exceeded');
+                        $valid++;
+                    } else {
+                        $contact->update([
+                            'validation_status' => Contact::STATUS_PENDING,
+                            'validation_result' => [
+                                'attempts' => $attempts,
+                                'reason' => $mailboxResult['reason'] ?? 'API connection failed, will retry',
+                            ],
+                            'validation_error' => 'Temporarily skipped (Attempt ' . $attempts . ')',
+                        ]);
+                        $skipped++;
+                    }
                 }
             }
         }
