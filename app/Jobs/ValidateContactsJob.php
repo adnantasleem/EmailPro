@@ -124,11 +124,13 @@ class ValidateContactsJob implements ShouldQueue
                     
                     // Save to cache if successful
                     if (in_array($mailboxResult['status'], ['valid', 'invalid', 'risky', 'unknown'])) {
-                        \App\Models\GlobalEmailCache::create([
-                            'email' => $email,
-                            'status' => $mailboxResult['status'],
-                            'reason' => $mailboxResult['reason'] ?? null,
-                        ]);
+                        \App\Models\GlobalEmailCache::updateOrCreate(
+                            ['email' => $email],
+                            [
+                                'status' => $mailboxResult['status'],
+                                'reason' => $mailboxResult['reason'] ?? null,
+                            ]
+                        );
                     }
                 
                 $validated++;
