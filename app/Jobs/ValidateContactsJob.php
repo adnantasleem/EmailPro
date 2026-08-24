@@ -39,8 +39,14 @@ class ValidateContactsJob implements ShouldQueue
     public function handle(EmailValidatorService $validator): void
     {
         $this->startTime = microtime(true);
+
+        // Early exit: if no pending contacts, skip immediately to avoid wasting queue time
+        $pendingCount = $this->contactList->contacts()->pendingValidation()->count();
+        if ($pendingCount === 0) {
+            return;
+        }
         
-        Log::info("ValidateContactsJob: Server-side validation for list {$this->contactList->id} - {$this->contactList->name}");
+        Log::info("ValidateContactsJob: Server-side validation for list {$this->contactList->id} - {$this->contactList->name} ({$pendingCount} pending)");
 
         $validated = 0;
         $valid = 0;
@@ -191,12 +197,10 @@ class ValidateContactsJob implements ShouldQueue
 
         Log::info("ValidateContactsJob: List {$this->contactList->id} - Verified: {$validated}, Valid: {$valid}, Invalid: {$invalid}, Skipped: {$skipped}");
 
-        // Self-loop: If there are still pending contacts for this list, dispatch another job immediately
-        // This bypasses the 1-minute scheduler wait and processes the list continuously.
+        // Log remaining count for visibility (scheduler handles re-dispatching)
         $remainingPending = $this->contactList->contacts()->pendingValidation()->count();
         if ($remainingPending > 0) {
-            Log::info("ValidateContactsJob: List {$this->contactList->id} has {$remainingPending} contacts left. Self-dispatching next batch immediately.");
-            self::dispatch($this->contactList);
+            Log::info("ValidateContactsJob: List {$this->contactList->id} has {$remainingPending} contacts left. Scheduler will dispatch next batch.");
         }
     }
 
