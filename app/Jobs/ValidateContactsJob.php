@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -17,7 +18,7 @@ use Illuminate\Support\Facades\Log;
  * All other quick checks (syntax, typo, disposable, DNS, etc.) 
  * are now done inline during contact import.
  */
-class ValidateContactsJob implements ShouldQueue
+class ValidateContactsJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -31,6 +32,14 @@ class ValidateContactsJob implements ShouldQueue
     public function __construct(public ContactList $contactList)
     {
         //
+    }
+
+    /**
+     * The unique ID of the job.
+     */
+    public function uniqueId(): string
+    {
+        return (string) $this->contactList->id;
     }
 
     /**
