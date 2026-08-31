@@ -507,15 +507,18 @@ class SmtpConfig extends Model
     /**
      * Record a bounce/failure.
      */
-    public function recordBounce(): void
+    public function recordBounce(bool $isAsync = false): void
     {
         $this->resetHourlyCountersIfNeeded();
         
-        $this->increment('total_sent');  // Count as an attempt
-        $this->increment('sent_last_hour'); // Count as an attempt
+        if (!$isAsync) {
+            $this->increment('total_sent');  // Count as an attempt
+            $this->increment('sent_last_hour'); // Count as an attempt
+            $this->increment('sent_today');  // Count bounces toward daily limit too
+        }
+
         $this->increment('total_bounced');
         $this->increment('bounced_last_hour');
-        $this->increment('sent_today');  // Count bounces toward daily limit too
         
         $this->recalculateBounceRate();
         $this->checkAndAutoPause();

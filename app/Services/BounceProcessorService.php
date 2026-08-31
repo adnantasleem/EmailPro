@@ -271,7 +271,7 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
                 
                 // Record the bounce on the SMTP config for tracking limits/pausing
                 // We only count it once even if it updated multiple recipient records
-                $smtp->recordBounce();
+                $smtp->recordBounce(true);
                 
                 Log::info("BounceProcessorService: Marked {$email} as bounced for user {$smtp->user_id} (updated {$updated} recipient records).");
             }
