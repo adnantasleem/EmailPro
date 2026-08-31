@@ -232,7 +232,7 @@ class ValidateContactsJob implements ShouldQueue, ShouldBeUnique
     /**
      * Synchronize the validation result to any active campaigns that are waiting on this email.
      */
-    protected function syncValidationToActiveCampaigns(string $email, string $status, array $result = [], string $reason = null): void
+    protected function syncValidationToActiveCampaigns(string $email, string $status, array $result = [], ?string $reason = null): void
     {
         if ($status === 'valid' || in_array($status, ['risky', 'unknown'])) {
             \App\Models\Recipient::where('email', $email)
