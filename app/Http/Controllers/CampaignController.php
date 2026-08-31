@@ -593,20 +593,16 @@ class CampaignController extends Controller
         // Update contact lists and import new contacts
         if ($request->has('contact_lists')) {
             $newListIds = $request->contact_lists ?? [];
-            $currentListIds = $campaign->contactLists->pluck('id')->toArray();
-            
-            // Find newly added lists (lists that weren't previously attached)
-            $addedListIds = array_diff($newListIds, $currentListIds);
             
             // Sync the relationship
             $campaign->contactLists()->sync($newListIds);
             
-            // Import contacts from newly added lists
-            if (!empty($addedListIds)) {
-                $this->syncRecipientsFromLists($campaign, array_values($addedListIds));
+            // Always sync ALL selected lists to catch any newly uploaded/validated contacts
+            if (!empty($newListIds)) {
+                $this->syncRecipientsFromLists($campaign, array_values($newListIds));
                 
                 return redirect()->route('campaigns.show', $campaign)
-                    ->with('success', "Campaign updated. Contacts have been instantly attached.");
+                    ->with('success', "Campaign updated. Contacts have been instantly attached and synced.");
             }
         }
 
@@ -1091,7 +1087,7 @@ class CampaignController extends Controller
         $bindings = array_merge(
             [$campaign->id, $now, $now],
             $listIds,
-            [$campaign->user_id, $campaign->user_id]
+            [$campaign->user_id, $campaign->user_id, $campaign->id]
         );
 
         $query = "
@@ -1112,10 +1108,33 @@ class CampaignController extends Controller
               AND c.validation_status != 'invalid'
               AND LOWER(c.email) NOT IN (SELECT LOWER(email) FROM unsubscribes WHERE user_id = ?)
               AND LOWER(c.email) NOT IN (SELECT LOWER(email) FROM invalid_emails WHERE user_id = ?)
+              AND LOWER(c.email) NOT IN (SELECT LOWER(email) FROM recipients WHERE campaign_id = ?)
             GROUP BY LOWER(c.email)
         ";
 
         $affected = \Illuminate\Support\Facades\DB::insert($query, $bindings);
+
+        // Also update any existing pending/validating recipients that have since been validated in the contacts list
+        $updateQuery = "
+            UPDATE recipients r
+            JOIN (
+                SELECT LOWER(email) as email, MAX(validation_result) as val_res, MAX(validated_at) as val_at
+                FROM contacts
+                WHERE contact_list_id IN ($placeholders)
+                  AND is_active = 1
+                  AND validation_status = 'valid'
+                GROUP BY LOWER(email)
+            ) c ON LOWER(r.email) = c.email
+            SET r.status = 'valid',
+                r.validation_result = c.val_res,
+                r.validated_at = c.val_at,
+                r.updated_at = ?
+            WHERE r.campaign_id = ?
+              AND r.status IN ('pending', 'validating')
+        ";
+        
+        $updateBindings = array_merge($listIds, [$now, $campaign->id]);
+        \Illuminate\Support\Facades\DB::update($updateQuery, $updateBindings);
 
         // Update campaign status instantly since we don't need background jobs anymore
         $campaign->update([
