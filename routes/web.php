@@ -109,6 +109,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/campaigns/{campaign}/recipients/bulk-delete', [RecipientController::class, 'bulkDelete'])->name('recipients.bulk-delete');
     Route::get('/campaigns/{campaign}/recipients/export', [RecipientController::class, 'export'])->name('recipients.export');
 
+    // Inbox
+    Route::get('/inbox', [\App\Http\Controllers\InboxController::class, 'index'])->name('inbox.index');
+    Route::get('/inbox/{reply}', [\App\Http\Controllers\InboxController::class, 'show'])->name('inbox.show');
+
     // Profile
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
