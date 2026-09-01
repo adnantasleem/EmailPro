@@ -33,6 +33,7 @@ class Recipient extends Model
         'validated_at' => 'datetime',
         'sent_at' => 'datetime',
         'opened_at' => 'datetime',
+        'replied_at' => 'datetime',
     ];
 
     const STATUS_PENDING = 'pending';
@@ -43,6 +44,7 @@ class Recipient extends Model
     const STATUS_SENT = 'sent';
     const STATUS_FAILED = 'failed';
     const STATUS_BOUNCED = 'bounced';
+    const STATUS_REPLIED = 'replied';
     const STATUS_UNSUBSCRIBED = 'unsubscribed';
 
     /**

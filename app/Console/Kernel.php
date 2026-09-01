@@ -23,10 +23,10 @@ class Kernel extends ConsoleKernel
             ->name('send-emails')
             ->withoutOverlapping();
 
-        // Process IMAP bounces every 5 minutes
-        $schedule->job(new \App\Jobs\ProcessBouncesJob())
+        // Process IMAP inbox (bounces and replies) every 5 minutes
+        $schedule->job(new \App\Jobs\ProcessImapInboxJob())
             ->everyFiveMinutes()
-            ->name('process-bounces')
+            ->name('process-imap-inbox')
             ->withoutOverlapping();
 
         // Daily reset of SMTP quotas and auto-resuming of paused campaigns

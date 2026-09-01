@@ -5,25 +5,26 @@ namespace App\Services;
 use App\Models\SmtpConfig;
 use App\Models\Recipient;
 use App\Models\InvalidEmail;
+use App\Models\Reply;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 
 class BounceProcessorService
 {
     /**
-     * Process bounces for a given SMTP config.
+     * Process bounces and replies for a given SMTP config.
      */
-    public function processBounces(SmtpConfig $smtp): int
+    public function processInbox(SmtpConfig $smtp): int
     {
         try {
             $client = $this->connectToImap($smtp);
             $client->connect();
         } catch (\Exception $e) {
-            Log::error("BounceProcessorService: Failed to connect to IMAP for SMTP {$smtp->id}: " . $e->getMessage());
+            Log::error("ImapProcessorService: Failed to connect to IMAP for SMTP {$smtp->id}: " . $e->getMessage());
             return 0;
         }
 
-        $bouncesProcessed = 0;
+        $emailsProcessed = 0;
         
         try {
             $folderName = $smtp->imap_folder ?: 'INBOX';
@@ -48,7 +49,16 @@ class BounceProcessorService
                         
                         if ($bouncedEmail) {
                             $this->handleBouncedAddress($smtp, $bouncedEmail);
-                            $bouncesProcessed++;
+                            $emailsProcessed++;
+                        }
+                    } else {
+                        // It's not a bounce. Is it a reply?
+                        $fromFullEmail = strtolower($message->getFrom()[0]->mail ?? '');
+                        if (filter_var($fromFullEmail, FILTER_VALIDATE_EMAIL)) {
+                            $wasReply = $this->handleReplyAddress($smtp, $fromFullEmail, $headerInfo->subject, $body, $message->hasHTMLBody() ? $message->getHTMLBody() : null);
+                            if ($wasReply) {
+                                $emailsProcessed++;
+                            }
                         }
                     }
                     
@@ -56,22 +66,22 @@ class BounceProcessorService
                     $message->setFlag('Seen');
                     
                 } catch (\Exception $e) {
-                    Log::error("BounceProcessorService: Error processing email for SMTP {$smtp->id}: " . $e->getMessage());
+                    Log::error("ImapProcessorService: Error processing email for SMTP {$smtp->id}: " . $e->getMessage());
                 }
             }
             
             $client->disconnect();
         } catch (\Exception $e) {
-            Log::error("BounceProcessorService: Error during mailbox operations for SMTP {$smtp->id}: " . $e->getMessage());
+            Log::error("ImapProcessorService: Error during mailbox operations for SMTP {$smtp->id}: " . $e->getMessage());
         }
         
         $smtp->update(['last_bounce_check_at' => now()]);
         
-        if ($bouncesProcessed > 0) {
-            Log::info("BounceProcessorService: Processed {$bouncesProcessed} bounces for SMTP {$smtp->id}.");
+        if ($emailsProcessed > 0) {
+            Log::info("ImapProcessorService: Processed {$emailsProcessed} emails for SMTP {$smtp->id}.");
         }
         
-        return $bouncesProcessed;
+        return $emailsProcessed;
     }
 
     /**
@@ -273,10 +283,60 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
                 // We only count it once even if it updated multiple recipient records
                 $smtp->recordBounce(true);
                 
-                Log::info("BounceProcessorService: Marked {$email} as bounced for user {$smtp->user_id} (updated {$updated} recipient records).");
+                Log::info("ImapProcessorService: Marked {$email} as bounced for user {$smtp->user_id} (updated {$updated} recipient records).");
             }
         });
     }
 
+    /**
+     * Handle the discovered reply address.
+     */
+    protected function handleReplyAddress(SmtpConfig $smtp, string $email, string $subject, string $bodyText, ?string $bodyHtml): bool
+    {
+        $wasReply = false;
+        
+        DB::transaction(function () use ($smtp, $email, $subject, $bodyText, $bodyHtml, &$wasReply) {
+            // Find the most recent recipient that was sent an email to this address
+            $recipient = Recipient::whereHas('campaign', function ($q) use ($smtp) {
+                    $q->where('user_id', $smtp->user_id);
+                })
+                ->where('email', $email)
+                ->whereIn('status', [Recipient::STATUS_SENT, Recipient::STATUS_REPLIED])
+                ->orderBy('sent_at', 'desc')
+                ->first();
+
+            if ($recipient) {
+                $wasReply = true;
+                
+                // If this is the FIRST reply, update the recipient status
+                if ($recipient->status !== Recipient::STATUS_REPLIED) {
+                    $recipient->update([
+                        'status' => Recipient::STATUS_REPLIED,
+                        'replied_at' => now(),
+                    ]);
+                }
+
+                // Store the actual reply in the database for the Unified Inbox
+                Reply::create([
+                    'user_id' => $smtp->user_id,
+                    'campaign_id' => $recipient->campaign_id,
+                    'recipient_id' => $recipient->id,
+                    'smtp_config_id' => $smtp->id,
+                    'from_email' => $email,
+                    'subject' => $subject,
+                    'body_text' => $bodyText,
+                    'body_html' => $bodyHtml,
+                    'received_at' => now(),
+                ]);
+                
+                // Increment total replies on the SMTP config
+                $smtp->increment('total_replies');
+                
+                Log::info("ImapProcessorService: Stored reply from {$email} for user {$smtp->user_id}.");
+            }
+        });
+        
+        return $wasReply;
+    }
 
 }

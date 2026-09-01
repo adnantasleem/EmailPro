@@ -146,6 +146,7 @@ class Campaign extends Model
             'valid' => $this->recipients()->where('status', 'valid')->count(),
             'invalid' => $this->recipients()->whereIn('status', ['invalid', 'disposable'])->count(),
             'sent' => $this->recipients()->where('status', 'sent')->count(),
+            'replied' => $this->recipients()->where('status', 'replied')->count(),
             'failed' => $this->recipients()->failedNonBounce()->count(),
             'bounced' => $this->recipients()->bounced()->count(),
         ];
