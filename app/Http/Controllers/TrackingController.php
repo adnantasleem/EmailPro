@@ -21,12 +21,12 @@ class TrackingController extends Controller
         $recipient = Recipient::where('unsubscribe_token', $token)->first();
 
         if ($recipient) {
-            // Record the open
-            $recipient->increment('open_count');
-            
-            // Set first open time if not already set
+            // Set first open time and count it once
             if (!$recipient->opened_at) {
-                $recipient->update(['opened_at' => now()]);
+                $recipient->update([
+                    'opened_at' => now(),
+                    'open_count' => 1
+                ]);
             }
         }
 

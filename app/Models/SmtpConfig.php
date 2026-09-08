@@ -400,6 +400,7 @@ class SmtpConfig extends Model
             'warmup_started_at' => today(),
             'warmup_day' => 1,
             'warmup_daily_limit' => 20, // Start with 20 emails/day
+            'limit_calculated_at' => null, // Force recalculation of pacing
         ]);
 
         Log::info("SMTP [{$this->name}] started warmup mode");
@@ -426,6 +427,7 @@ class SmtpConfig extends Model
         $this->update([
             'warmup_day' => $newDay,
             'warmup_daily_limit' => $newLimit,
+            'limit_calculated_at' => null, // Force recalculation of pacing
         ]);
 
         Log::info("SMTP [{$this->name}] warmup day {$newDay}, limit: {$newLimit}");
@@ -456,6 +458,7 @@ class SmtpConfig extends Model
             'warmup_started_at' => null,
             'warmup_day' => 0,
             'warmup_daily_limit' => 0,
+            'limit_calculated_at' => null, // Force recalculation of pacing
         ]);
 
         Log::info("SMTP [{$this->name}] completed warmup, now using full limit: {$this->daily_limit}");

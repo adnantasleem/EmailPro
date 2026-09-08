@@ -217,42 +217,118 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- A/B Testing Analytics -->
+            <div class="space-y-6 mb-6">
                 <!-- Subject Line Performance -->
                 <div class="bg-white rounded-lg shadow-sm overflow-hidden">
-                    <div class="p-4 border-b border-gray-200">
-                        <h3 class="text-lg font-semibold text-gray-900">Subject Line Performance</h3>
+                    <div class="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                        <h3 class="text-lg font-semibold text-gray-900">A/B Testing: Subject Lines</h3>
+                        <span class="text-xs font-medium text-gray-500 bg-gray-200 px-2.5 py-1 rounded-full">Winner based on Open Rate</span>
                     </div>
-                    <div class="divide-y divide-gray-200">
-                        @forelse($subjectStats as $subject)
-                            <div class="p-4">
-                                <div class="flex justify-between items-start">
-                                    <p class="text-sm text-gray-900 flex-1 pr-4">{{ $subject['subject'] }}</p>
-                                    <span class="text-sm font-medium text-indigo-600">{{ $subject['usage_count'] }} uses</span>
-                                </div>
-                            </div>
-                        @empty
-                            <div class="p-4 text-center text-gray-500">No subject lines</div>
-                        @endforelse
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-white">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/2">Subject Line</th>
+                                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Sent</th>
+                                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Opens</th>
+                                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Open Rate</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 bg-white">
+                                @php
+                                    $bestSubjectId = null;
+                                    if (count($subjectStats) > 1) {
+                                        $maxRate = collect($subjectStats)->max('open_rate');
+                                        if ($maxRate > 0) {
+                                            $bestSubjectId = collect($subjectStats)->firstWhere('open_rate', $maxRate)['id'] ?? null;
+                                        }
+                                    }
+                                @endphp
+                                @forelse($subjectStats as $subject)
+                                    <tr class="{{ $bestSubjectId === $subject['id'] ? 'bg-green-50/50' : 'hover:bg-gray-50' }}">
+                                        <td class="px-4 py-3 text-sm text-gray-900">
+                                            <div class="flex items-center gap-2">
+                                                @if($bestSubjectId === $subject['id'])
+                                                    <span class="text-green-600" title="Winning Subject Line">🏆</span>
+                                                @endif
+                                                <span class="{{ $bestSubjectId === $subject['id'] ? 'font-medium text-green-900' : '' }}">{{ $subject['subject'] }}</span>
+                                            </div>
+                                        </td>
+                                        <td class="px-4 py-3 text-sm text-gray-500 text-center">{{ $subject['sent_count'] }}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-500 text-center">{{ $subject['open_count'] }}</td>
+                                        <td class="px-4 py-3 text-center">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ $bestSubjectId === $subject['id'] ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800' }}">
+                                                {{ $subject['open_rate'] }}%
+                                            </span>
+                                        </td>
+                                    </tr>
+                                @empty
+                                    <tr>
+                                        <td colspan="4" class="px-4 py-8 text-center text-gray-500">No subject lines</td>
+                                    </tr>
+                                @endforelse
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 
                 <!-- Body Template Performance -->
                 <div class="bg-white rounded-lg shadow-sm overflow-hidden">
-                    <div class="p-4 border-b border-gray-200">
-                        <h3 class="text-lg font-semibold text-gray-900">Body Template Performance</h3>
+                    <div class="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                        <h3 class="text-lg font-semibold text-gray-900">A/B Testing: Body Templates</h3>
+                        <span class="text-xs font-medium text-gray-500 bg-gray-200 px-2.5 py-1 rounded-full">Winner based on Reply Rate</span>
                     </div>
-                    <div class="divide-y divide-gray-200">
-                        @forelse($bodyStats as $index => $body)
-                            <div class="p-4">
-                                <div class="flex justify-between items-start">
-                                    <p class="text-sm text-gray-600 flex-1 pr-4"><span class="font-semibold text-gray-900">{{ $body['name'] ?? 'Template #' . ($index + 1) }}</span>: {{ $body['preview'] }}</p>
-                                    <span class="text-sm font-medium text-indigo-600">{{ $body['usage_count'] }} uses</span>
-                                </div>
-                            </div>
-                        @empty
-                            <div class="p-4 text-center text-gray-500">No body templates</div>
-                        @endforelse
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-white">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/2">Template</th>
+                                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Sent</th>
+                                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Replies</th>
+                                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Reply Rate</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 bg-white">
+                                @php
+                                    $bestBodyId = null;
+                                    if (count($bodyStats) > 1) {
+                                        $maxRate = collect($bodyStats)->max('reply_rate');
+                                        if ($maxRate > 0) {
+                                            $bestBodyId = collect($bodyStats)->firstWhere('reply_rate', $maxRate)['id'] ?? null;
+                                        }
+                                    }
+                                @endphp
+                                @forelse($bodyStats as $index => $body)
+                                    <tr class="{{ $bestBodyId === $body['id'] ? 'bg-green-50/50' : 'hover:bg-gray-50' }}">
+                                        <td class="px-4 py-3 text-sm text-gray-900">
+                                            <div class="flex items-start gap-2">
+                                                @if($bestBodyId === $body['id'])
+                                                    <span class="text-green-600 mt-0.5" title="Winning Body Template">🏆</span>
+                                                @endif
+                                                <div>
+                                                    <div class="font-medium {{ $bestBodyId === $body['id'] ? 'text-green-900' : 'text-gray-900' }}">
+                                                        {{ $body['name'] ?? 'Template #' . ($index + 1) }}
+                                                    </div>
+                                                    <div class="text-xs text-gray-500 mt-1 line-clamp-1">{{ $body['preview'] }}</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td class="px-4 py-3 text-sm text-gray-500 text-center align-middle">{{ $body['sent_count'] }}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-500 text-center align-middle">{{ $body['reply_count'] }}</td>
+                                        <td class="px-4 py-3 text-center align-middle">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ $bestBodyId === $body['id'] ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800' }}">
+                                                {{ $body['reply_rate'] }}%
+                                            </span>
+                                        </td>
+                                    </tr>
+                                @empty
+                                    <tr>
+                                        <td colspan="4" class="px-4 py-8 text-center text-gray-500">No body templates</td>
+                                    </tr>
+                                @endforelse
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>

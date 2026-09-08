@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Campaign;
 use App\Models\SubjectLine;
 use App\Models\BodyTemplate;
+use Illuminate\Support\Facades\DB;
 
 class ContentRotatorService
 {
@@ -49,11 +50,37 @@ class ContentRotatorService
      */
     public function getSubjectStats(Campaign $campaign): array
     {
-        return $campaign->subjectLines()
+        $subjects = $campaign->subjectLines()
             ->select('id', 'subject', 'usage_count')
             ->orderByDesc('usage_count')
-            ->get()
-            ->toArray();
+            ->get();
+
+        return $subjects->map(function ($subject) use ($campaign) {
+            // Get stats directly from email_logs joined with recipients
+            $stats = DB::table('email_logs')
+                ->join('recipients', 'email_logs.recipient_id', '=', 'recipients.id')
+                ->where('email_logs.campaign_id', $campaign->id)
+                ->where('email_logs.subject_line_id', $subject->id)
+                ->selectRaw('COUNT(*) as sent_count')
+                ->selectRaw('SUM(CASE WHEN recipients.opened_at IS NOT NULL THEN 1 ELSE 0 END) as open_count')
+                ->selectRaw('SUM(CASE WHEN recipients.status = "replied" THEN 1 ELSE 0 END) as reply_count')
+                ->first();
+
+            $sent = $stats->sent_count ?? 0;
+            $opens = $stats->open_count ?? 0;
+            $replies = $stats->reply_count ?? 0;
+
+            return [
+                'id' => $subject->id,
+                'subject' => $subject->subject,
+                'usage_count' => $subject->usage_count,
+                'sent_count' => $sent,
+                'open_count' => $opens,
+                'open_rate' => $sent > 0 ? round(($opens / $sent) * 100, 1) : 0,
+                'reply_count' => $replies,
+                'reply_rate' => $sent > 0 ? round(($replies / $sent) * 100, 1) : 0,
+            ];
+        })->toArray();
     }
 
     /**
@@ -65,12 +92,31 @@ class ContentRotatorService
             ->select('id', 'name', 'usage_count', 'html_content')
             ->orderByDesc('usage_count')
             ->get()
-            ->map(function ($template) {
+            ->map(function ($template) use ($campaign) {
+                // Get stats directly from email_logs joined with recipients
+                $stats = DB::table('email_logs')
+                    ->join('recipients', 'email_logs.recipient_id', '=', 'recipients.id')
+                    ->where('email_logs.campaign_id', $campaign->id)
+                    ->where('email_logs.body_template_id', $template->id)
+                    ->selectRaw('COUNT(*) as sent_count')
+                    ->selectRaw('SUM(CASE WHEN recipients.opened_at IS NOT NULL THEN 1 ELSE 0 END) as open_count')
+                    ->selectRaw('SUM(CASE WHEN recipients.status = "replied" THEN 1 ELSE 0 END) as reply_count')
+                    ->first();
+
+                $sent = $stats->sent_count ?? 0;
+                $opens = $stats->open_count ?? 0;
+                $replies = $stats->reply_count ?? 0;
+
                 return [
                     'id' => $template->id,
                     'name' => $template->name,
-                    'usage_count' => $template->usage_count,
                     'preview' => substr(strip_tags($template->html_content), 0, 100) . '...',
+                    'usage_count' => $template->usage_count,
+                    'sent_count' => $sent,
+                    'open_count' => $opens,
+                    'open_rate' => $sent > 0 ? round(($opens / $sent) * 100, 1) : 0,
+                    'reply_count' => $replies,
+                    'reply_rate' => $sent > 0 ? round(($replies / $sent) * 100, 1) : 0,
                 ];
             })
             ->toArray();
