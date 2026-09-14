@@ -9,7 +9,7 @@ use App\Models\Reply;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 
-class BounceProcessorService
+class ImapProcessorService
 {
     /**
      * Process bounces and replies for a given SMTP config.
