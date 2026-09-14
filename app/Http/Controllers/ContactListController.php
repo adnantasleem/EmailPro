@@ -50,6 +50,8 @@ class ContactListController extends Controller
             'description' => 'nullable|string|max:1000',
             'emails' => 'nullable|string',
             'file' => 'nullable|file|mimes:csv,txt|max:10240',
+        ], [
+            'file.max' => 'The uploaded file must not be larger than 10MB. Please split your list into smaller files before uploading.',
         ]);
 
         $contactList = ContactList::create([
@@ -182,6 +184,8 @@ class ContactListController extends Controller
         $validated = $request->validate([
             'emails' => 'nullable|string',
             'file' => 'nullable|file|mimes:csv,txt|max:10240',
+        ], [
+            'file.max' => 'The uploaded file must not be larger than 10MB. Please split your list into smaller files before uploading.',
         ]);
 
         $result = ['imported' => 0, 'duplicates' => 0, 'global_duplicates' => 0, 'unsubscribed' => 0, 'blocklisted' => 0, 'disposable' => 0, 'invalid_syntax' => 0, 'skipped_emails' => [], 'valid_emails' => []];

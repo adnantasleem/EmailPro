@@ -69,4 +69,20 @@ jane@example.com,Jane Smith,Tech Co,Boston
             </div>
         </div>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInputs = document.querySelectorAll('input[type="file"]');
+            fileInputs.forEach(input => {
+                input.addEventListener('change', function(e) {
+                    const file = e.target.files[0];
+                    // 10MB in bytes = 10 * 1024 * 1024 = 10485760
+                    if (file && file.size > 10485760) { 
+                        alert('The selected file is too large! The maximum allowed file size is 10MB. Please split your list into smaller files.');
+                        e.target.value = ''; // Clear the input so it won't upload
+                    }
+                });
+            });
+        });
+    </script>
 </x-app-layout>
