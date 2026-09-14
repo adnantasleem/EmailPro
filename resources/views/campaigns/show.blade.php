@@ -117,6 +117,14 @@
                         📋 Duplicate
                     </button>
                 </form>
+                @if($stats['pending'] > 0)
+                <form action="{{ route('campaigns.sync-recipients', $campaign) }}" method="POST" class="inline" onsubmit="return confirm('Instantly convert fully validated pending contacts to valid?')">
+                    @csrf
+                    <button type="submit" class="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-md hover:bg-indigo-200 text-sm font-medium">
+                        🔄 Sync Pending
+                    </button>
+                </form>
+                @endif
             </div>
 
             <!-- Stats Overview -->

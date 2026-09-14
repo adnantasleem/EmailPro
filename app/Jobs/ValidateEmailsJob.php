@@ -31,8 +31,12 @@ class ValidateEmailsJob implements ShouldQueue
      */
     public function handle(EmailValidatorService $validator): void
     {
-        // Find campaigns in validating status
-        $campaigns = Campaign::status(Campaign::STATUS_VALIDATING)->get();
+        // Find campaigns in validating or sending status that have pending recipients
+        $campaigns = Campaign::whereIn('status', [Campaign::STATUS_VALIDATING, Campaign::STATUS_SENDING])
+            ->whereHas('recipients', function ($q) {
+                $q->where('status', Recipient::STATUS_PENDING);
+            })
+            ->get();
 
         if ($campaigns->isEmpty()) {
             Log::info('ValidateEmailsJob: No campaigns to validate');
@@ -65,11 +69,13 @@ class ValidateEmailsJob implements ShouldQueue
                 $validCount = $campaign->recipients()->status(Recipient::STATUS_VALID)->count();
                 
                 if ($validCount > 0) {
-                    $campaign->update([
-                        'status' => Campaign::STATUS_SENDING,
-                        'started_at' => now(),
-                    ]);
-                    Log::info("ValidateEmailsJob: Campaign {$campaign->id} moved to sending status");
+                    if ($campaign->status === Campaign::STATUS_VALIDATING) {
+                        $campaign->update([
+                            'status' => Campaign::STATUS_SENDING,
+                            'started_at' => now(),
+                        ]);
+                        Log::info("ValidateEmailsJob: Campaign {$campaign->id} moved to sending status");
+                    }
                 } else {
                     Log::warning("ValidateEmailsJob: Campaign {$campaign->id} has no valid recipients");
                 }

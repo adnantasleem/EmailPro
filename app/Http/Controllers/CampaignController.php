@@ -626,6 +626,35 @@ class CampaignController extends Controller
     }
 
     /**
+     * Sync pending recipients with their contact list validation status.
+     */
+    public function syncRecipients(Campaign $campaign)
+    {
+        if ((int) $campaign->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        // Use a direct raw SQL update to handle 100,000+ records instantly without PHP memory/timeout issues
+        $affectedRows = \Illuminate\Support\Facades\DB::update("
+            UPDATE recipients r
+            INNER JOIN contacts c ON r.email = c.email
+            INNER JOIN contact_lists cl ON c.contact_list_id = cl.id
+            SET 
+                r.status = c.validation_status,
+                r.validation_result = c.validation_result,
+                r.validated_at = COALESCE(c.validated_at, NOW()),
+                r.updated_at = NOW()
+            WHERE r.campaign_id = ?
+              AND r.status = 'pending'
+              AND cl.user_id = ?
+              AND c.validation_status != 'pending'
+        ", [$campaign->id, $campaign->user_id]);
+
+        return redirect()->route('campaigns.show', $campaign)
+            ->with('success', "Successfully synced $affectedRows pending recipients instantly.");
+    }
+
+    /**
      * Send a test email for the campaign.
      */
     public function sendTestEmail(Request $request, Campaign $campaign, \App\Services\EmailSenderService $emailSender)

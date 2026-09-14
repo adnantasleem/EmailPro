@@ -100,6 +100,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/campaigns/{campaign}/retry-failed', [CampaignController::class, 'retryFailed'])->name('campaigns.retry-failed');
     Route::post('/campaigns/{campaign}/duplicate', [CampaignController::class, 'duplicate'])->name('campaigns.duplicate');
     Route::post('/campaigns/{campaign}/test-email', [CampaignController::class, 'sendTestEmail'])->name('campaigns.test-email');
+    Route::post('/campaigns/{campaign}/sync-recipients', [CampaignController::class, 'syncRecipients'])->name('campaigns.sync-recipients');
 
     // Recipients
     Route::get('/campaigns/{campaign}/recipients', [RecipientController::class, 'index'])->name('recipients.index');
