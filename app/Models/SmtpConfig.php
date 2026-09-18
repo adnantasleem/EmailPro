@@ -538,6 +538,9 @@ class SmtpConfig extends Model
         
         if ($sent > 0) {
             $rate = ($bounced / $sent) * 100;
+            // Cap the rate at 100% to prevent SQL DECIMAL(5,2) out of range errors
+            // (This happens when bounces arrive in an hour where fewer emails were sent)
+            $rate = min($rate, 100); 
             $this->update(['bounce_rate' => round($rate, 2)]);
         }
     }
