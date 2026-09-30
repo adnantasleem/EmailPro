@@ -36,15 +36,21 @@ class ImapProcessorService
                     $folders = $client->getFolders(false);
                     foreach ($folders as $f) {
                         $availableFolders[] = $f->path;
+                        // Try case-insensitive match
+                        if (strtolower($f->name) === strtolower($folderName) || strtolower($f->path) === strtolower($folderName)) {
+                            $folder = $f;
+                        }
                     }
                 } catch (\Exception $e) {
                     $availableFolders[] = 'Error fetching folders';
                 }
                 
-                $foldersStr = !empty($availableFolders) ? implode(', ', $availableFolders) : 'None';
-                Log::error("ImapProcessorService: Folder '{$folderName}' not found for SMTP {$smtp->id}. Available folders: {$foldersStr}");
-                $client->disconnect();
-                return 0;
+                if (!$folder) {
+                    $foldersStr = !empty($availableFolders) ? implode(', ', $availableFolders) : 'None';
+                    Log::error("ImapProcessorService: Folder '{$folderName}' not found for SMTP {$smtp->id}. Available folders: {$foldersStr}");
+                    $client->disconnect();
+                    return 0;
+                }
             }
             
             // Search for UNSEEN emails
