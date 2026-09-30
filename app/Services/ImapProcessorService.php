@@ -30,6 +30,23 @@ class ImapProcessorService
             $folderName = $smtp->imap_folder ?: 'INBOX';
             $folder = $client->getFolder($folderName);
             
+            if (!$folder) {
+                $availableFolders = [];
+                try {
+                    $folders = $client->getFolders(false);
+                    foreach ($folders as $f) {
+                        $availableFolders[] = $f->path;
+                    }
+                } catch (\Exception $e) {
+                    $availableFolders[] = 'Error fetching folders';
+                }
+                
+                $foldersStr = !empty($availableFolders) ? implode(', ', $availableFolders) : 'None';
+                Log::error("ImapProcessorService: Folder '{$folderName}' not found for SMTP {$smtp->id}. Available folders: {$foldersStr}");
+                $client->disconnect();
+                return 0;
+            }
+            
             // Search for UNSEEN emails
             $messages = $folder->query()->unseen()->get();
             
