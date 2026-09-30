@@ -25,6 +25,8 @@ class ValidateContactsJob implements ShouldQueue, ShouldBeUnique
     protected int $batchSize = 5; // Smaller batch for slow SMTP checks
     protected int $maxExecutionTime = 50; // Max seconds to run (cron is 55s, leave buffer)
     protected float $startTime;
+    public int $uniqueFor = 3600; // 1 hour timeout for the unique lock
+
 
     /**
      * Create a new job instance.
