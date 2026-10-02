@@ -21,13 +21,10 @@ class InboxController extends Controller
         return view('inbox.index', compact('replies'));
     }
 
-    /**
-     * Display the specified reply.
-     */
     public function show(Reply $reply)
     {
         // Ensure the reply belongs to the authenticated user
-        if ($reply->user_id !== Auth::id()) {
+        if ($reply->user_id != Auth::id()) {
             abort(403, 'Unauthorized action.');
         }
 
