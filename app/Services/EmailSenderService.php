@@ -100,7 +100,7 @@ class EmailSenderService
             // Update counters and logs (use recordSend for bounce tracking)
             $smtp->recordSend();
             $this->contentRotator->trackUsage($subject, $body);
-            $recipient->markAsSent();
+            $recipient->markAsSent($smtp->id);
 
             EmailLog::logSuccess($campaign, $recipient, $smtp, $subject, $body);
 
@@ -111,6 +111,7 @@ class EmailSenderService
             $result['error'] = $errorMsg;
 
             $isBounce = Recipient::isBounceError($errorMsg);
+            $smtpId = isset($smtp) ? $smtp->id : null;
 
             // Log failure and record bounce if we have SMTP info
             if (isset($smtp)) {
@@ -131,9 +132,9 @@ class EmailSenderService
             if ($errorMsg === 'No available SMTP accounts' || str_starts_with($errorMsg, 'Monthly email limit reached')) {
                 // Return success=false but keep recipient in pending/valid state for later
             } elseif ($isBounce) {
-                $recipient->markAsBounced($errorMsg);
+                $recipient->markAsBounced($errorMsg, $smtpId);
             } else {
-                $recipient->markAsFailed($errorMsg);
+                $recipient->markAsFailed($errorMsg, $smtpId);
             }
         }
 

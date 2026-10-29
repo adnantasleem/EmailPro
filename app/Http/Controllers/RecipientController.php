@@ -26,12 +26,21 @@ class RecipientController extends Controller
             }
         }
 
+        // Filter by SMTP
+        if ($request->filled('smtp_id') && $request->smtp_id !== 'all') {
+            $smtpId = (int) $request->smtp_id;
+            $query->where(function ($q) use ($smtpId) {
+                $q->where('smtp_config_id', $smtpId)
+                  ->orWhereHas('emailLogs', fn($el) => $el->where('smtp_config_id', $smtpId));
+            });
+        }
+
         // Search by email
         if ($request->has('search') && !empty($request->search)) {
             $query->where('email', 'like', '%' . $request->search . '%');
         }
 
-        $recipients = $query->latest()->paginate(50);
+        $recipients = $query->with(['smtpConfig', 'latestEmailLog.smtpConfig'])->latest()->paginate(50)->withQueryString();
 
         $statusCounts = [
             'all' => $campaign->recipients()->count(),
@@ -43,7 +52,17 @@ class RecipientController extends Controller
             'bounced' => $campaign->recipients()->bounced()->count(),
         ];
 
-        return view('recipients.index', compact('campaign', 'recipients', 'statusCounts'));
+        // Fetch SMTP configs used in this campaign for filtering
+        $campaignSmtps = \App\Models\SmtpConfig::where('user_id', auth()->id())
+            ->where(function ($q) use ($campaign) {
+                $q->whereHas('campaigns', fn($c) => $c->where('campaigns.id', $campaign->id))
+                  ->orWhereHas('emailLogs', fn($el) => $el->where('campaign_id', $campaign->id))
+                  ->orWhereIn('id', $campaign->recipients()->whereNotNull('smtp_config_id')->select('smtp_config_id'));
+            })
+            ->orderBy('name')
+            ->get();
+
+        return view('recipients.index', compact('campaign', 'recipients', 'statusCounts', 'campaignSmtps'));
     }
 
     /**
@@ -128,15 +147,23 @@ class RecipientController extends Controller
             }
         }
 
+        if ($request->filled('smtp_id') && $request->smtp_id !== 'all') {
+            $smtpId = (int) $request->smtp_id;
+            $query->where(function ($q) use ($smtpId) {
+                $q->where('smtp_config_id', $smtpId)
+                  ->orWhereHas('emailLogs', fn($el) => $el->where('smtp_config_id', $smtpId));
+            });
+        }
+
         $query->orderBy('id');
 
         $filename = "campaign_{$campaign->id}_recipients.csv";
 
         return response()->streamDownload(function () use ($query) {
             $file = fopen('php://output', 'w');
-            fputcsv($file, ['Email', 'Name', 'Status', 'Sent At', 'Error']);
+            fputcsv($file, ['Email', 'Name', 'Status', 'SMTP Account', 'SMTP From Email', 'Sent At', 'Error']);
 
-            $query->chunk(1000, function ($recipients) use ($file) {
+            $query->with(['smtpConfig', 'latestEmailLog.smtpConfig'])->chunk(1000, function ($recipients) use ($file) {
                 foreach ($recipients as $recipient) {
                     $status = $recipient->status;
                     
@@ -152,10 +179,14 @@ class RecipientController extends Controller
                         }
                     }
 
+                    $smtp = $recipient->smtp_account;
+
                     fputcsv($file, [
                         $recipient->email,
                         $recipient->name ?? '',
                         $status,
+                        $smtp ? $smtp->name : 'N/A',
+                        $smtp ? $smtp->from_email : 'N/A',
                         $recipient->sent_at?->format('Y-m-d H:i:s') ?? '',
                         $recipient->error_message ?? '',
                     ]);

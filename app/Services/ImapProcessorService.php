@@ -277,15 +277,31 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
             // Note: A user might send to the same email in multiple campaigns.
             // If it bounced now, it's generally safe to mark it bounced in active/recent campaigns.
             
-            $updated = Recipient::whereHas('campaign', function ($q) use ($smtp) {
+            $bouncedRecipients = Recipient::whereHas('campaign', function ($q) use ($smtp) {
                     $q->where('user_id', $smtp->user_id);
                 })
                 ->where('email', $email)
                 ->whereIn('status', [Recipient::STATUS_SENT, Recipient::STATUS_FAILED])
-                ->update([
-                    'status' => Recipient::STATUS_BOUNCED,
-                    'error_message' => 'IMAP Bounce Detected: Delivery failed.'
-                ]);
+                ->get();
+
+            $updated = 0;
+            if ($bouncedRecipients->isNotEmpty()) {
+                $recipientIds = $bouncedRecipients->pluck('id')->toArray();
+
+                $updated = Recipient::whereIn('id', $recipientIds)
+                    ->update([
+                        'status' => Recipient::STATUS_BOUNCED,
+                        'error_message' => 'IMAP Bounce Detected: Delivery failed.',
+                        'smtp_config_id' => DB::raw('COALESCE(smtp_config_id, ' . (int) $smtp->id . ')'),
+                    ]);
+
+                // Also update corresponding EmailLog entries to bounced
+                \App\Models\EmailLog::whereIn('recipient_id', $recipientIds)
+                    ->update([
+                        'status' => \App\Models\EmailLog::STATUS_BOUNCED,
+                        'error_message' => 'IMAP Bounce Detected: Delivery failed.',
+                    ]);
+            }
 
             if ($updated > 0) {
                 // Add to invalid emails blocklist so it's not mailed again

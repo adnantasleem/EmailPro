@@ -449,6 +449,7 @@
                                 <tr>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8">#</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SMTP</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Error Type</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
                                 </tr>
@@ -495,11 +496,21 @@
                                         }
                                         // Create a short readable error message
                                         $shortMsg = Str::limit($msg, 80);
+                                        $smtp = $recipient->smtp_account;
                                     @endphp
                                     <tr class="hover:bg-gray-50 transition-colors">
                                         <td class="px-4 py-3 text-xs text-gray-400 font-mono">{{ $index + 1 }}</td>
                                         <td class="px-4 py-3">
                                             <span class="text-sm font-medium text-gray-900">{{ $recipient->email }}</span>
+                                        </td>
+                                        <td class="px-4 py-3 text-xs text-gray-700">
+                                            @if($smtp)
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800" title="{{ $smtp->host }} ({{ $smtp->from_email }})">
+                                                    {{ $smtp->name }}
+                                                </span>
+                                            @else
+                                                <span class="text-gray-400 italic">None</span>
+                                            @endif
                                         </td>
                                         <td class="px-4 py-3">
                                             <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full {{ $badgeClass }}">
@@ -519,6 +530,67 @@
                                                     <button @click="expanded = false" class="mt-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium underline">show less</button>
                                                 </div>
                                             </div>
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            @endif
+
+            <!-- Bounced Deliveries -->
+            @if(isset($bouncedRecipients) && $bouncedRecipients->count() > 0)
+                <div class="mt-6 bg-white rounded-lg shadow-sm overflow-hidden">
+                    <div class="p-4 border-b border-purple-200 bg-gradient-to-r from-purple-50 to-indigo-50">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span class="text-xl">📬</span>
+                                <h3 class="text-lg font-semibold text-purple-900">Bounced Deliveries</h3>
+                                <span class="px-2.5 py-0.5 text-sm font-medium rounded-full bg-purple-100 text-purple-800">{{ $bouncedRecipients->count() }}</span>
+                            </div>
+                            <a href="{{ route('recipients.index', ['campaign' => $campaign, 'status' => 'bounced']) }}" class="text-xs text-purple-700 hover:text-purple-900 font-medium">
+                                View All Bounced in Recipients &rarr;
+                            </a>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8">#</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SMTP Used</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason / Details</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                                @foreach($bouncedRecipients as $index => $recipient)
+                                    @php
+                                        $msg = $recipient->error_message ?? 'Bounced delivery';
+                                        $smtp = $recipient->smtp_account;
+                                    @endphp
+                                    <tr class="hover:bg-gray-50 transition-colors">
+                                        <td class="px-4 py-3 text-xs text-gray-400 font-mono">{{ $index + 1 }}</td>
+                                        <td class="px-4 py-3">
+                                            <span class="text-sm font-medium text-gray-900">{{ $recipient->email }}</span>
+                                        </td>
+                                        <td class="px-4 py-3 text-xs text-gray-700">
+                                            @if($smtp)
+                                                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium bg-indigo-50 border border-indigo-100 text-indigo-900" title="{{ $smtp->host }} ({{ $smtp->from_email }})">
+                                                    <svg class="w-3.5 h-3.5 text-indigo-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                                                    {{ $smtp->name }}
+                                                </span>
+                                            @else
+                                                <span class="text-gray-400 italic">None</span>
+                                            @endif
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <span class="text-xs text-gray-600 truncate block max-w-md" title="{{ $msg }}">{{ Str::limit($msg, 80) }}</span>
+                                        </td>
+                                        <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                                            {{ $recipient->sent_at ? $recipient->sent_at->format('M d, H:i') : ($recipient->updated_at ? $recipient->updated_at->format('M d, H:i') : '-') }}
                                         </td>
                                     </tr>
                                 @endforeach

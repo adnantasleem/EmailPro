@@ -250,7 +250,15 @@ class CampaignController extends Controller
             ->get();
 
         $failedRecipients = $campaign->recipients()
+            ->with(['smtpConfig', 'latestEmailLog.smtpConfig'])
             ->where('status', Recipient::STATUS_FAILED)
+            ->limit(50)
+            ->get();
+
+        $bouncedRecipients = $campaign->recipients()
+            ->with(['smtpConfig', 'latestEmailLog.smtpConfig'])
+            ->bounced()
+            ->latest('updated_at')
             ->limit(50)
             ->get();
 
@@ -269,6 +277,7 @@ class CampaignController extends Controller
             'bodyStats',
             'recentLogs',
             'failedRecipients',
+            'bouncedRecipients',
             'openedRecipients',
             'smtpConfigs'
         ));
@@ -344,6 +353,65 @@ class CampaignController extends Controller
             ->orderBy('date', 'desc')
             ->get();
 
+        // SMTP Performance Breakdown
+        $smtpIds = $campaign->recipients()->whereNotNull('smtp_config_id')->distinct()->pluck('smtp_config_id')
+            ->merge(\App\Models\EmailLog::where('campaign_id', $campaign->id)->distinct()->pluck('smtp_config_id'))
+            ->merge($campaign->smtpConfigs->pluck('id'))
+            ->unique()
+            ->filter();
+
+        $smtps = \App\Models\SmtpConfig::whereIn('id', $smtpIds)->get()->keyBy('id');
+        $smtpStats = [];
+
+        foreach ($smtpIds as $id) {
+            $smtp = $smtps->get($id);
+            if (!$smtp) continue;
+
+            $recipientsForSmtp = $campaign->recipients()->where('smtp_config_id', $id);
+            $rTotal = (clone $recipientsForSmtp)->count();
+
+            if ($rTotal > 0) {
+                $sent = (clone $recipientsForSmtp)->where('status', \App\Models\Recipient::STATUS_SENT)->count();
+                $bounced = (clone $recipientsForSmtp)->bounced()->count();
+                $failed = (clone $recipientsForSmtp)->failedNonBounce()->count();
+                $total = $rTotal;
+            } else {
+                $logs = \App\Models\EmailLog::where('campaign_id', $campaign->id)->where('smtp_config_id', $id);
+                $total = (clone $logs)->count();
+                $sent = (clone $logs)->where('status', \App\Models\EmailLog::STATUS_SENT)->count();
+                $bounced = (clone $logs)->where('status', \App\Models\EmailLog::STATUS_BOUNCED)->count();
+                $failed = (clone $logs)->where('status', \App\Models\EmailLog::STATUS_FAILED)->count();
+            }
+
+            $deliveryRate = $total > 0 ? round(($sent / $total) * 100, 1) : 0;
+            $bounceRate = $total > 0 ? round(($bounced / $total) * 100, 1) : 0;
+
+            $smtpStats[] = [
+                'id' => $smtp->id,
+                'name' => $smtp->name,
+                'from_email' => $smtp->from_email,
+                'host' => $smtp->host,
+                'total' => $total,
+                'sent' => $sent,
+                'bounced' => $bounced,
+                'failed' => $failed,
+                'delivery_rate' => $deliveryRate,
+                'bounce_rate' => $bounceRate,
+            ];
+        }
+
+        usort($smtpStats, fn($a, $b) => $b['total'] <=> $a['total']);
+
+        // Recent bounced and failed recipients for detailed delivery logs in the report
+        $bouncedRecipients = $campaign->recipients()
+            ->with(['smtpConfig', 'latestEmailLog.smtpConfig'])
+            ->where(function ($q) {
+                $q->bounced()->orWhere('status', \App\Models\Recipient::STATUS_FAILED);
+            })
+            ->latest('updated_at')
+            ->limit(100)
+            ->get();
+
         return view('campaigns.report', compact(
             'campaign',
             'stats',
@@ -351,7 +419,9 @@ class CampaignController extends Controller
             'bodyStats',
             'duration',
             'errorCategories',
-            'dailyStats'
+            'dailyStats',
+            'smtpStats',
+            'bouncedRecipients'
         ));
     }
 
@@ -955,6 +1025,8 @@ class CampaignController extends Controller
                 'email',
                 'name',
                 'status',
+                'smtp_account',
+                'smtp_from_email',
                 'sent_at',
                 'opened_at',
                 'open_count',
@@ -967,9 +1039,38 @@ class CampaignController extends Controller
 
             // Write data rows in chunks using DB for faster performance
             \Illuminate\Support\Facades\DB::table('recipients')
-                ->where('campaign_id', $campaign->id)
-                ->orderBy('id')
+                ->leftJoin('smtp_configs', 'recipients.smtp_config_id', '=', 'smtp_configs.id')
+                ->where('recipients.campaign_id', $campaign->id)
+                ->select(
+                    'recipients.*',
+                    'smtp_configs.name as direct_smtp_name',
+                    'smtp_configs.from_email as direct_smtp_email'
+                )
+                ->orderBy('recipients.id')
                 ->chunk(5000, function ($recipients) use ($handle) {
+                    // For any recipients where direct_smtp_name is null, fallback to latest email_logs
+                    $missingSmtpRecipientIds = [];
+                    foreach ($recipients as $r) {
+                        if (empty($r->direct_smtp_name) && in_array($r->status, ['sent', 'failed', 'bounced'])) {
+                            $missingSmtpRecipientIds[] = $r->id;
+                        }
+                    }
+
+                    $fallbackSmtps = [];
+                    if (!empty($missingSmtpRecipientIds)) {
+                        $logs = \Illuminate\Support\Facades\DB::table('email_logs')
+                            ->join('smtp_configs', 'email_logs.smtp_config_id', '=', 'smtp_configs.id')
+                            ->whereIn('email_logs.recipient_id', $missingSmtpRecipientIds)
+                            ->select('email_logs.recipient_id', 'smtp_configs.name', 'smtp_configs.from_email')
+                            ->orderBy('email_logs.id', 'desc')
+                            ->get();
+                        foreach ($logs as $log) {
+                            if (!isset($fallbackSmtps[$log->recipient_id])) {
+                                $fallbackSmtps[$log->recipient_id] = $log;
+                            }
+                        }
+                    }
+
                     foreach ($recipients as $recipient) {
                         $rawStatus = trim($recipient->status ?? '');
                         $errorMsg = $recipient->error_message ?? '';
@@ -989,11 +1090,16 @@ class CampaignController extends Controller
                         } else {
                             $displayStatus = $rawStatus;
                         }
+
+                        $smtpName = $recipient->direct_smtp_name ?? ($fallbackSmtps[$recipient->id]->name ?? '');
+                        $smtpEmail = $recipient->direct_smtp_email ?? ($fallbackSmtps[$recipient->id]->from_email ?? '');
                         
                         fputcsv($handle, [
                             $recipient->email,
                             $recipient->name ?? '',
                             $displayStatus,
+                            $smtpName,
+                            $smtpEmail,
                             $recipient->sent_at ?? '',
                             $recipient->opened_at ?? '',
                             $recipient->open_count ?? 0,

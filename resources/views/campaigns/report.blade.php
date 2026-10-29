@@ -101,6 +101,74 @@
                 @endif
             </div>
 
+            <!-- SMTP Accounts Performance -->
+            @if(isset($smtpStats) && count($smtpStats) > 0)
+            <div class="p-8 border-b border-gray-200">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-bold text-gray-900 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                        SMTP Accounts Performance
+                    </h2>
+                    <span class="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full font-medium">
+                        {{ count($smtpStats) }} {{ Str::plural('Account', count($smtpStats)) }} Used
+                    </span>
+                </div>
+                <div class="overflow-x-auto rounded-lg border border-gray-200">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SMTP Account</th>
+                                <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Sent (Success)</th>
+                                <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Bounced</th>
+                                <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Failed</th>
+                                <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Bounce Rate</th>
+                                <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total Attempted</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            @foreach($smtpStats as $smtp)
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <div class="font-medium text-gray-900 text-sm">{{ $smtp['name'] }}</div>
+                                    <div class="text-xs text-gray-500">{{ $smtp['from_email'] }} &bull; {{ $smtp['host'] }}</div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-center text-green-600 font-semibold">
+                                    {{ $smtp['sent'] }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-center">
+                                    @if($smtp['bounced'] > 0)
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800">
+                                            {{ $smtp['bounced'] }}
+                                        </span>
+                                    @else
+                                        <span class="text-gray-400">0</span>
+                                    @endif
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-center">
+                                    @if($smtp['failed'] > 0)
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-800">
+                                            {{ $smtp['failed'] }}
+                                        </span>
+                                    @else
+                                        <span class="text-gray-400">0</span>
+                                    @endif
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-center">
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ $smtp['bounce_rate'] > 5 ? 'bg-red-100 text-red-800 font-bold' : ($smtp['bounce_rate'] > 0 ? 'bg-orange-100 text-orange-800' : 'bg-green-100 text-green-800') }}">
+                                        {{ $smtp['bounce_rate'] }}%
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 font-bold bg-gray-50">
+                                    {{ $smtp['total'] }}
+                                </td>
+                            </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            @endif
+
             <!-- Content Performance -->
             <div class="p-8 border-b border-gray-200">
                 <h2 class="text-xl font-bold text-gray-900 mb-6">Content Performance</h2>
@@ -133,7 +201,6 @@
             </div>
 
             <!-- Error Breakdown -->
-            <!-- Error Breakdown -->
             @if(count($errorCategories) > 0)
             <div class="p-8 border-b border-gray-100">
                 <h2 class="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
@@ -150,6 +217,77 @@
                         @endforeach
                     </div>
                 </div>
+            </div>
+            @endif
+
+            <!-- Bounced & Failed Delivery Details (with SMTP Used) -->
+            @if(isset($bouncedRecipients) && $bouncedRecipients->count() > 0)
+            <div class="p-8 border-b border-gray-200">
+                <div class="flex justify-between items-center mb-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-900 flex items-center gap-2">
+                            <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                            Bounced & Failed Deliveries (SMTP Audit)
+                        </h2>
+                        <p class="text-sm text-gray-500 mt-1">Check which SMTP account attempted or bounced each recipient email</p>
+                    </div>
+                    <a href="{{ route('recipients.index', ['campaign' => $campaign, 'status' => 'bounced']) }}" target="_blank" class="no-print text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1">
+                        View in Recipients Manager &rarr;
+                    </a>
+                </div>
+                <div class="overflow-x-auto rounded-lg border border-gray-200">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recipient Email</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SMTP Used</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason / Error Details</th>
+                                <th scope="col" class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Date / Time</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            @foreach($bouncedRecipients as $r)
+                            @php $smtp = $r->smtp_account; @endphp
+                            <tr>
+                                <td class="px-4 py-3 text-sm font-medium text-gray-900 whitespace-nowrap">
+                                    {{ $r->email }}
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    @if($r->isBounced())
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
+                                            Bounced
+                                        </span>
+                                    @else
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800">
+                                            Failed
+                                        </span>
+                                    @endif
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap text-sm">
+                                    @if($smtp)
+                                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-50 border border-indigo-100 text-xs font-medium text-indigo-900" title="{{ $smtp->host }} ({{ $smtp->from_email }})">
+                                            <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                                            {{ $smtp->name }}
+                                        </span>
+                                    @else
+                                        <span class="text-xs text-gray-400 italic">None</span>
+                                    @endif
+                                </td>
+                                <td class="px-4 py-3 text-xs text-gray-600 max-w-sm truncate" title="{{ $r->error_message }}">
+                                    {{ Str::limit($r->error_message ?? 'Delivery failure', 80) }}
+                                </td>
+                                <td class="px-4 py-3 text-xs text-right text-gray-500 whitespace-nowrap">
+                                    {{ $r->sent_at ? $r->sent_at->format('M d, H:i') : ($r->updated_at ? $r->updated_at->format('M d, H:i') : '-') }}
+                                </td>
+                            </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+                @if($bouncedRecipients->count() >= 100)
+                    <p class="text-xs text-gray-400 mt-2 text-right">Showing recent 100 bounced/failed recipients. View full list in Recipients or Export CSV.</p>
+                @endif
             </div>
             @endif
 

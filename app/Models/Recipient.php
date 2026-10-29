@@ -14,6 +14,7 @@ class Recipient extends Model
 
     protected $fillable = [
         'campaign_id',
+        'smtp_config_id',
         'email',
         'name',
         'custom_fields',
@@ -56,11 +57,43 @@ class Recipient extends Model
     }
 
     /**
+     * Get the SMTP config used to send/attempt to this recipient.
+     */
+    public function smtpConfig(): BelongsTo
+    {
+        return $this->belongsTo(SmtpConfig::class);
+    }
+
+    /**
      * Get email logs for this recipient.
      */
     public function emailLogs(): HasMany
     {
         return $this->hasMany(EmailLog::class);
+    }
+
+    /**
+     * Get the latest email log for this recipient.
+     */
+    public function latestEmailLog(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(EmailLog::class)->latestOfMany();
+    }
+
+    /**
+     * Accessor to get the SMTP config whether from direct column or fallback to latestEmailLog.
+     */
+    public function getSmtpAccountAttribute(): ?SmtpConfig
+    {
+        if ($this->relationLoaded('smtpConfig') && $this->smtpConfig) {
+            return $this->smtpConfig;
+        }
+
+        if ($this->relationLoaded('latestEmailLog') && $this->latestEmailLog?->smtpConfig) {
+            return $this->latestEmailLog->smtpConfig;
+        }
+
+        return $this->smtpConfig ?? $this->latestEmailLog?->smtpConfig;
     }
 
     /**
@@ -104,34 +137,46 @@ class Recipient extends Model
     /**
      * Mark recipient as sent.
      */
-    public function markAsSent(): void
+    public function markAsSent(?int $smtpConfigId = null): void
     {
-        $this->update([
+        $data = [
             'status' => self::STATUS_SENT,
             'sent_at' => now(),
-        ]);
+        ];
+        if ($smtpConfigId) {
+            $data['smtp_config_id'] = $smtpConfigId;
+        }
+        $this->update($data);
     }
 
     /**
      * Mark recipient as failed.
      */
-    public function markAsFailed(string $errorMessage): void
+    public function markAsFailed(string $errorMessage, ?int $smtpConfigId = null): void
     {
-        $this->update([
+        $data = [
             'status' => self::STATUS_FAILED,
             'error_message' => $errorMessage,
-        ]);
+        ];
+        if ($smtpConfigId) {
+            $data['smtp_config_id'] = $smtpConfigId;
+        }
+        $this->update($data);
     }
 
     /**
      * Mark recipient as bounced.
      */
-    public function markAsBounced(string $errorMessage): void
+    public function markAsBounced(string $errorMessage, ?int $smtpConfigId = null): void
     {
-        $this->update([
+        $data = [
             'status' => self::STATUS_BOUNCED,
             'error_message' => $errorMessage,
-        ]);
+        ];
+        if ($smtpConfigId) {
+            $data['smtp_config_id'] = $smtpConfigId;
+        }
+        $this->update($data);
     }
 
     /**
