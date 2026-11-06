@@ -205,10 +205,16 @@
                                                     </button>
                                                 </form>
                                             @endif
-                                            <form action="{{ route('smtp.test', $smtp['id']) }}" method="POST" class="inline">
+                                            <form action="{{ route('smtp.test', $smtp['id']) }}" method="POST" class="inline" title="Send test email via SMTP">
                                                 @csrf
-                                                <button type="submit" class="text-purple-600 hover:text-purple-900">Test</button>
+                                                <button type="submit" class="text-purple-600 hover:text-purple-900">Test SMTP</button>
                                             </form>
+                                            @if($smtp['bounce_check_enabled'])
+                                                <form action="{{ route('smtp.test-imap', $smtp['id']) }}" method="POST" class="inline" title="Test IMAP connection for replies & bounces">
+                                                    @csrf
+                                                    <button type="submit" class="text-teal-600 hover:text-teal-900">Test IMAP</button>
+                                                </form>
+                                            @endif
                                             <a href="{{ route('smtp.edit', $smtp['id']) }}" class="text-indigo-600 hover:text-indigo-900">Edit</a>
                                             <form action="{{ route('smtp.reset-counter', $smtp['id']) }}" method="POST" class="inline">
                                                 @csrf

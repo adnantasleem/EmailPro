@@ -230,30 +230,42 @@ class SmtpConfigController extends Controller
     /**
      * Test the IMAP connection for the given SMTP config.
      */
-    public function testImapConnection(SmtpConfig $smtp)
+    public function testImapConnection(Request $request, SmtpConfig $smtp)
     {
         if ((int) $smtp->user_id !== auth()->id()) {
             abort(403);
         }
 
         if (!$smtp->bounce_check_enabled) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Bounce monitoring is not enabled for this SMTP configuration.'
-            ], 400);
+            $msg = 'Bounce and reply monitoring is not enabled for this SMTP configuration.';
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $msg
+                ], 400);
+            }
+            return back()->with('error', $msg);
         }
 
         try {
             $smtp->testImapConnection();
-            return response()->json([
-                'success' => true,
-                'message' => 'IMAP connection successful! EmailPro can monitor bounces for this account.'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage()
-            ], 500);
+            $msg = "IMAP connection successful for '{$smtp->name}'! EmailPro can receive replies and monitor bounces.";
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => $msg
+                ]);
+            }
+            return back()->with('success', $msg);
+        } catch (\Throwable $e) {
+            $msg = "IMAP connection failed for '{$smtp->name}': " . $e->getMessage();
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $msg
+                ], 500);
+            }
+            return back()->with('error', $msg);
         }
     }
 

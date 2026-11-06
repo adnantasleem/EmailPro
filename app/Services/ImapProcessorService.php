@@ -61,9 +61,55 @@ class ImapProcessorService
                     $headerRaw = $message->getHeader()->raw ?? '';
                     $body = $message->hasHTMLBody() ? $message->getHTMLBody() : ($message->hasTextBody() ? $message->getTextBody() : '');
                     
+                    // Safely extract From address
+                    $fromObj = null;
+                    try {
+                        $fromCollection = $message->getFrom();
+                        if ($fromCollection && method_exists($fromCollection, 'first')) {
+                            $fromObj = $fromCollection->first();
+                        } elseif (is_array($fromCollection) && !empty($fromCollection)) {
+                            $fromObj = $fromCollection[0];
+                        }
+                    } catch (\Throwable $e) {
+                        // Ignore extraction exception
+                    }
+
+                    $fromMailbox = $fromObj ? ($fromObj->mailbox ?? '') : '';
+                    $fromFullEmail = '';
+
+                    if ($fromObj) {
+                        if (!empty($fromObj->mail)) {
+                            $fromFullEmail = $fromObj->mail;
+                        } elseif (!empty($fromObj->mailbox) && !empty($fromObj->host)) {
+                            $fromFullEmail = $fromObj->mailbox . '@' . $fromObj->host;
+                        }
+                    }
+
+                    // Fallback to Reply-To if From was empty
+                    if (empty($fromFullEmail)) {
+                        try {
+                            $replyToCollection = $message->getReplyTo();
+                            $replyToObj = ($replyToCollection && method_exists($replyToCollection, 'first')) 
+                                ? $replyToCollection->first() 
+                                : (is_array($replyToCollection) && !empty($replyToCollection) ? $replyToCollection[0] : null);
+
+                            if ($replyToObj) {
+                                if (!empty($replyToObj->mail)) {
+                                    $fromFullEmail = $replyToObj->mail;
+                                } elseif (!empty($replyToObj->mailbox) && !empty($replyToObj->host)) {
+                                    $fromFullEmail = $replyToObj->mailbox . '@' . $replyToObj->host;
+                                }
+                            }
+                        } catch (\Throwable $e) {
+                            // Ignore fallback exception
+                        }
+                    }
+
+                    $fromFullEmail = trim(strtolower($fromFullEmail), "<>\"' \t\n\r\0\x0B");
+
                     $headerInfo = new \stdClass();
                     $headerInfo->from = [
-                        (object) ['mailbox' => $message->getFrom()[0]->mailbox ?? '']
+                        (object) ['mailbox' => $fromMailbox]
                     ];
                     $headerInfo->subject = (string) $message->getSubject();
                     
@@ -76,17 +122,22 @@ class ImapProcessorService
                         }
                     } else {
                         // It's not a bounce. Is it a reply?
-                        $fromFullEmail = strtolower($message->getFrom()[0]->mail ?? '');
                         if (filter_var($fromFullEmail, FILTER_VALIDATE_EMAIL)) {
                             $wasReply = $this->handleReplyAddress($smtp, $fromFullEmail, $headerInfo->subject, $body, $message->hasHTMLBody() ? $message->getHTMLBody() : null);
                             if ($wasReply) {
                                 $emailsProcessed++;
                             }
+                        } else {
+                            Log::warning("ImapProcessorService: Ignored non-bounce message with invalid sender '{$fromFullEmail}' on SMTP {$smtp->id}");
                         }
                     }
                     
                     // Mark as seen so we don't process it again
-                    $message->setFlag('Seen');
+                    try {
+                        $message->setFlag('Seen');
+                    } catch (\Throwable $e) {
+                        Log::warning("ImapProcessorService: Could not set Seen flag for message on SMTP {$smtp->id}: " . $e->getMessage());
+                    }
                     
                 } catch (\Exception $e) {
                     Log::error("ImapProcessorService: Error processing email for SMTP {$smtp->id}: " . $e->getMessage());
@@ -335,16 +386,33 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
         $wasReply = false;
         
         DB::transaction(function () use ($smtp, $email, $subject, $bodyText, $bodyHtml, &$wasReply) {
-            // Find the most recent recipient that was sent an email to this address
+            // Find the most recent recipient in any campaign for this user with case-insensitive email match
             $recipient = Recipient::whereHas('campaign', function ($q) use ($smtp) {
                     $q->where('user_id', $smtp->user_id);
                 })
-                ->where('email', $email)
-                ->whereIn('status', [Recipient::STATUS_SENT, Recipient::STATUS_REPLIED])
+                ->where(function ($q) use ($email) {
+                    $q->where('email', $email)
+                      ->orWhereRaw('LOWER(email) = ?', [strtolower($email)]);
+                })
+                ->orderByRaw("CASE WHEN status IN ('sent', 'replied') THEN 0 ELSE 1 END")
                 ->orderBy('sent_at', 'desc')
+                ->orderBy('updated_at', 'desc')
                 ->first();
 
             if ($recipient) {
+                // Prevent duplicate reply records within the last 7 days
+                $alreadyExists = Reply::where('user_id', $smtp->user_id)
+                    ->where('recipient_id', $recipient->id)
+                    ->where('from_email', $email)
+                    ->where('subject', $subject)
+                    ->where('created_at', '>=', now()->subDays(7))
+                    ->exists();
+
+                if ($alreadyExists) {
+                    Log::info("ImapProcessorService: Reply already recorded from {$email} for recipient {$recipient->id}.");
+                    return;
+                }
+
                 $wasReply = true;
                 
                 // If this is the FIRST reply, update the recipient status
@@ -371,7 +439,9 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
                 // Increment total replies on the SMTP config
                 $smtp->increment('total_replies');
                 
-                Log::info("ImapProcessorService: Stored reply from {$email} for user {$smtp->user_id}.");
+                Log::info("ImapProcessorService: Stored reply from {$email} for user {$smtp->user_id} (Campaign {$recipient->campaign_id}, Recipient {$recipient->id}).");
+            } else {
+                Log::info("ImapProcessorService: Ignored email from {$email} - no matching campaign recipient found for user {$smtp->user_id}.");
             }
         });
         

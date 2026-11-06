@@ -112,6 +112,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Inbox
     Route::get('/inbox', [\App\Http\Controllers\InboxController::class, 'index'])->name('inbox.index');
+    Route::post('/inbox/sync', [\App\Http\Controllers\InboxController::class, 'sync'])->name('inbox.sync');
     Route::get('/inbox/{reply}', [\App\Http\Controllers\InboxController::class, 'show'])->name('inbox.show');
 
     // Profile

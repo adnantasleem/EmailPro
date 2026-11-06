@@ -24,7 +24,22 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping();
 
         // Process IMAP inbox (bounces and replies) every 5 minutes
-        $schedule->job(new \App\Jobs\ProcessImapInboxJob())
+        // We run this synchronously via schedule->call so it executes reliably on both
+        // VPS/CloudPanel and Shared Hosting (where persistent queue workers often cannot run).
+        $schedule->call(function (\App\Services\ImapProcessorService $processor) {
+            $smtps = SmtpConfig::where('is_active', true)
+                ->where('bounce_check_enabled', true)
+                ->orderBy('last_bounce_check_at', 'asc')
+                ->get();
+
+            foreach ($smtps as $smtp) {
+                try {
+                    $processor->processInbox($smtp);
+                } catch (\Throwable $e) {
+                    Log::error("Scheduler IMAP error for SMTP {$smtp->id}: " . $e->getMessage());
+                }
+            }
+        })
             ->everyFiveMinutes()
             ->name('process-imap-inbox')
             ->withoutOverlapping();

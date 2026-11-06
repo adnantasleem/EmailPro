@@ -160,39 +160,54 @@ class SmtpConfig extends Model
 
     /**
      * Test the IMAP connection using current configuration.
+     * Uses Webklex PHP-IMAP (pure PHP stream sockets) so php-imap extension is NOT required.
      * Throws an exception if connection fails.
      */
     public function testImapConnection(): bool
     {
-        if (!function_exists('imap_open')) {
-            throw new \Exception('PHP IMAP extension is not installed on the server.');
-        }
-
-        $host = $this->imap_host;
-        $port = $this->imap_port ?: 993;
         $encryption = $this->imap_encryption === 'ssl' || $this->imap_encryption === 'tls' 
-            ? '/' . $this->imap_encryption 
-            : '';
-        $folder = $this->imap_folder ?: 'INBOX';
+            ? $this->imap_encryption 
+            : false;
 
-        // Format: {imap.example.com:993/imap/ssl}INBOX
-        $mailbox = "{{$host}:{$port}/imap{$encryption}}{$folder}";
+        $cm = new \Webklex\PHPIMAP\ClientManager();
         
-        $username = $this->username;
-        $password = $this->decrypted_imap_password;
-
-        // Try to open connection (timeout after 10 seconds)
-        $inbox = @imap_open($mailbox, $username, $password, OP_HALFOPEN, 1, [
-            'DISABLE_AUTHENTICATOR' => 'PLAIN'
+        $client = $cm->make([
+            'host'          => $this->imap_host,
+            'port'          => $this->imap_port ?: 993,
+            'encryption'    => $encryption,
+            'validate_cert' => false,
+            'username'      => $this->username,
+            'password'      => $this->decrypted_imap_password,
+            'protocol'      => 'imap'
         ]);
 
-        if (!$inbox) {
-            $errors = imap_errors();
-            $errorMsg = $errors ? end($errors) : 'Unknown IMAP error';
-            throw new \Exception("IMAP Connection failed: {$errorMsg}");
+        $client->connect();
+        
+        $folderName = $this->imap_folder ?: 'INBOX';
+        $folder = $client->getFolder($folderName);
+        
+        if (!$folder) {
+            $availableFolders = [];
+            try {
+                $folders = $client->getFolders(false);
+                foreach ($folders as $f) {
+                    $availableFolders[] = $f->path;
+                    if (strtolower($f->name) === strtolower($folderName) || strtolower($f->path) === strtolower($folderName)) {
+                        $folder = $f;
+                    }
+                }
+            } catch (\Exception $e) {
+                // Ignore folder listing error
+            }
+            
+            if (!$folder) {
+                $client->disconnect();
+                $availStr = !empty($availableFolders) ? implode(', ', $availableFolders) : 'none found';
+                throw new \Exception("Connected to IMAP server, but folder '{$folderName}' was not found. Available folders: {$availStr}");
+            }
         }
 
-        imap_close($inbox);
+        $client->disconnect();
         return true;
     }
 

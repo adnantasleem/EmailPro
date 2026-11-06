@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Reply;
+use App\Models\SmtpConfig;
+use App\Services\ImapProcessorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -19,6 +21,43 @@ class InboxController extends Controller
             ->paginate(20);
 
         return view('inbox.index', compact('replies'));
+    }
+
+    /**
+     * Manually check IMAP inboxes for new replies and bounces.
+     */
+    public function sync(ImapProcessorService $processor)
+    {
+        $smtps = SmtpConfig::where('user_id', Auth::id())
+            ->where('is_active', true)
+            ->where('bounce_check_enabled', true)
+            ->get();
+
+        if ($smtps->isEmpty()) {
+            return redirect()->route('inbox.index')
+                ->with('error', 'No active SMTP accounts found with bounce/reply detection enabled. Please enable IMAP in your SMTP settings.');
+        }
+
+        $totalProcessed = 0;
+        $errors = [];
+
+        foreach ($smtps as $smtp) {
+            try {
+                $processed = $processor->processInbox($smtp);
+                $totalProcessed += $processed;
+            } catch (\Throwable $e) {
+                $errors[] = "SMTP {$smtp->name}: " . $e->getMessage();
+            }
+        }
+
+        if (!empty($errors)) {
+            $errorMsg = implode('; ', $errors);
+            return redirect()->route('inbox.index')
+                ->with('warning', "Inbox sync finished with warnings ({$totalProcessed} items processed). Errors: {$errorMsg}");
+        }
+
+        return redirect()->route('inbox.index')
+            ->with('success', "Inbox checked successfully! Processed {$totalProcessed} new email(s).");
     }
 
     public function show(Reply $reply)
