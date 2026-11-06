@@ -45,6 +45,8 @@ class SmtpConfigController extends Controller
                 'warmup_day' => $smtp->warmup_day,
                 'warmup_daily_limit' => $smtp->warmup_daily_limit,
                 // Bounce tracking fields
+                'bounce_check_enabled' => (bool) $smtp->bounce_check_enabled,
+                'imap_host' => $smtp->imap_host,
                 'bounce_rate' => $smtp->bounce_rate,
                 'total_sent' => $smtp->total_sent,
                 'total_bounced' => $smtp->total_bounced,

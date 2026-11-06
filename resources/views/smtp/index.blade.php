@@ -209,7 +209,7 @@
                                                 @csrf
                                                 <button type="submit" class="text-purple-600 hover:text-purple-900">Test SMTP</button>
                                             </form>
-                                            @if($smtp['bounce_check_enabled'])
+                                            @if(!empty($smtp['bounce_check_enabled']))
                                                 <form action="{{ route('smtp.test-imap', $smtp['id']) }}" method="POST" class="inline" title="Test IMAP connection for replies & bounces">
                                                     @csrf
                                                     <button type="submit" class="text-teal-600 hover:text-teal-900">Test IMAP</button>
