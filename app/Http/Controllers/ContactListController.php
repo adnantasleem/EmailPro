@@ -279,8 +279,11 @@ class ContactListController extends Controller
         
         if (!empty($validEmails)) {
             $imported = $contactList->saveStagedContacts($validEmails);
-            // Dispatch background job to do final validation
-            ValidateContactsJob::dispatch($contactList);
+            // If using an async queue driver, dispatch immediately; under 'sync', let the 1-min cron handle it
+            // so the user's browser request returns immediately without timing out on shared hosting.
+            if (config('queue.default') !== 'sync') {
+                ValidateContactsJob::dispatch($contactList);
+            }
         }
         
         // Cleanup temp file

@@ -146,6 +146,14 @@ class SmtpConfig extends Model
         return $this->hasMany(EmailLog::class);
     }
 
+    /**
+     * The campaigns that use this SMTP configuration.
+     */
+    public function campaigns(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Campaign::class, 'campaign_smtp_config');
+    }
+
     // ========================================
     // IMAP & BOUNCE MONITORING
     // ========================================
@@ -157,6 +165,11 @@ class SmtpConfig extends Model
     {
         return $this->decrypted_password;
     }
+
+    /**
+     * In-memory cache of last sent timestamps per SMTP ID to avoid repeated DB cache queries.
+     */
+    protected static array $lastSentMemoryCache = [];
 
     /**
      * Test the IMAP connection using current configuration.
@@ -178,7 +191,8 @@ class SmtpConfig extends Model
             'validate_cert' => false,
             'username'      => $this->username,
             'password'      => $this->decrypted_imap_password,
-            'protocol'      => 'imap'
+            'protocol'      => 'imap',
+            'timeout'       => 8,
         ]);
 
         $client->connect();
@@ -236,6 +250,15 @@ class SmtpConfig extends Model
      */
     public function canSend(): bool
     {
+        return $this->getSecondsUntilNextSend() === 0;
+    }
+
+    /**
+     * Return 0 if ready to send now, > 0 for seconds until intra-hour pacing cooldown expires,
+     * or null if this SMTP cannot send (inactive, paused, outside active hours, or quota reached).
+     */
+    public function getSecondsUntilNextSend(): ?int
+    {
         $this->resetDailyCounterIfNeeded();
         $this->resetHourlyCountersIfNeeded();
         
@@ -244,14 +267,14 @@ class SmtpConfig extends Model
             if ($this->paused_at->lt(now()->subHours(24))) {
                 $this->autoResume();
             } else {
-                return false;
+                return null;
             }
         } elseif ($this->auto_paused) {
-            return false;
+            return null;
         }
         
         if (!$this->is_active) {
-            return false;
+            return null;
         }
 
         // Active Time Check (e.g. only send between 09:00 and 17:00)
@@ -260,26 +283,25 @@ class SmtpConfig extends Model
             // Handle times that span across midnight (e.g., 22:00 to 06:00)
             if ($this->active_time_start > $this->active_time_end) {
                 if ($nowTime < $this->active_time_start && $nowTime > $this->active_time_end) {
-                    return false;
+                    return null;
                 }
             } else {
                 // Normal daytime shift
                 if ($nowTime < $this->active_time_start || $nowTime > $this->active_time_end) {
-                    return false;
+                    return null;
                 }
             }
         }
 
         $dailyLimit = $this->getEffectiveLimit();
         if ($dailyLimit !== null && $this->sent_today >= $dailyLimit) {
-            return false;
+            return null;
         }
 
         // Calculate dynamic hourly limit for this hour if needed
         $startOfHour = now()->startOfHour();
         if (!$this->limit_calculated_at || $this->limit_calculated_at->lt($startOfHour)) {
             if ($this->pacing_strategy === 'per_day' || $this->is_warming_up) {
-                // Determine active hours
                 $activeHours = 24;
                 if (!empty($this->active_time_start) && !empty($this->active_time_end)) {
                     $start = \Carbon\Carbon::parse($this->active_time_start);
@@ -292,7 +314,7 @@ class SmtpConfig extends Model
                     if ($activeHours <= 0) $activeHours = 24;
                 }
                 
-                $safeDailyLimit = $dailyLimit ?? 100; // fallback if somehow null on per_day
+                $safeDailyLimit = $dailyLimit ?? 100;
                 $hourlyAvg = $safeDailyLimit / $activeHours;
                 $min = max(1, (int) floor($hourlyAvg));
                 $max = max(1, (int) ceil($hourlyAvg));
@@ -301,7 +323,6 @@ class SmtpConfig extends Model
                 $max = $this->max_emails_per_hour ?? ($dailyLimit ? max(1, (int) ceil($dailyLimit / 24)) : 20);
             }
             
-            // Ensure min is <= max
             if ($min > $max) {
                 $min = $max;
             }
@@ -316,18 +337,24 @@ class SmtpConfig extends Model
 
         // Anti-Burst 1: Enforce hourly limit
         if ($this->sent_last_hour >= $hourlyLimit) {
-            return false;
+            return null;
         }
 
-        // Anti-Burst 2: Enforce pacing between emails (Intra-hour spacing)
-        $minSecondsBetweenEmails = (int) floor(3600 / $hourlyLimit);
-        $lastSentAt = \Illuminate\Support\Facades\Cache::get("smtp_{$this->id}_last_sent");
+        // Anti-Burst 2: Enforce pacing between emails (Intra-hour spacing, minimum 2s safety gap)
+        $minSecondsBetweenEmails = max(2, (int) floor(3600 / $hourlyLimit));
+        if (!array_key_exists($this->id, self::$lastSentMemoryCache)) {
+            self::$lastSentMemoryCache[$this->id] = \Illuminate\Support\Facades\Cache::get("smtp_{$this->id}_last_sent");
+        }
+        $lastSentAt = self::$lastSentMemoryCache[$this->id];
         
-        if ($lastSentAt && (now()->timestamp - $lastSentAt) < $minSecondsBetweenEmails) {
-            return false; // Waiting for the required time interval to pass
+        if ($lastSentAt) {
+            $elapsed = now()->timestamp - $lastSentAt;
+            if ($elapsed < $minSecondsBetweenEmails) {
+                return max(1, $minSecondsBetweenEmails - $elapsed);
+            }
         }
         
-        return true;
+        return 0;
     }
 
     /**
@@ -506,39 +533,53 @@ class SmtpConfig extends Model
     // ========================================
 
     /**
-     * Record a successful send.
+     * Record a successful send in a single database query.
      */
     public function recordSend(): void
     {
         $this->resetHourlyCountersIfNeeded();
-        
-        $this->increment('total_sent');
-        $this->increment('sent_last_hour');
-        $this->increment('sent_today');
-        
-        // Record exact timestamp to enforce intra-hour pacing
-        \Illuminate\Support\Facades\Cache::put("smtp_{$this->id}_last_sent", now()->timestamp, 3600);
-        
-        $this->recalculateBounceRate();
+
+        $newTotalSent = $this->total_sent + 1;
+        $newSentLastHour = $this->sent_last_hour + 1;
+        $newSentToday = $this->sent_today + 1;
+        $newRate = $newSentLastHour > 0 ? min(100, round(($this->bounced_last_hour / $newSentLastHour) * 100, 2)) : 0;
+
+        $this->update([
+            'total_sent' => $newTotalSent,
+            'sent_last_hour' => $newSentLastHour,
+            'sent_today' => $newSentToday,
+            'bounce_rate' => $newRate,
+        ]);
+
+        // Record timestamp with 0-2s human-like jitter in memory and cache to enforce natural intra-hour pacing
+        $nowTs = now()->timestamp + rand(0, 2);
+        self::$lastSentMemoryCache[$this->id] = $nowTs;
+        \Illuminate\Support\Facades\Cache::put("smtp_{$this->id}_last_sent", $nowTs, 3600);
     }
 
     /**
-     * Record a bounce/failure.
+     * Record a bounce/failure in a single database query.
      */
     public function recordBounce(bool $isAsync = false): void
     {
         $this->resetHourlyCountersIfNeeded();
-        
-        if (!$isAsync) {
-            $this->increment('total_sent');  // Count as an attempt
-            $this->increment('sent_last_hour'); // Count as an attempt
-            $this->increment('sent_today');  // Count bounces toward daily limit too
-        }
 
-        $this->increment('total_bounced');
-        $this->increment('bounced_last_hour');
-        
-        $this->recalculateBounceRate();
+        $newTotalSent = $this->total_sent + ($isAsync ? 0 : 1);
+        $newSentLastHour = $this->sent_last_hour + ($isAsync ? 0 : 1);
+        $newSentToday = $this->sent_today + ($isAsync ? 0 : 1);
+        $newTotalBounced = $this->total_bounced + 1;
+        $newBouncedLastHour = $this->bounced_last_hour + 1;
+        $newRate = $newSentLastHour > 0 ? min(100, round(($newBouncedLastHour / $newSentLastHour) * 100, 2)) : $this->bounce_rate;
+
+        $this->update([
+            'total_sent' => $newTotalSent,
+            'sent_last_hour' => $newSentLastHour,
+            'sent_today' => $newSentToday,
+            'total_bounced' => $newTotalBounced,
+            'bounced_last_hour' => $newBouncedLastHour,
+            'bounce_rate' => $newRate,
+        ]);
+
         $this->checkAndAutoPause();
     }
 

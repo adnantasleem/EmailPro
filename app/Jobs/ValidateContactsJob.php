@@ -22,18 +22,18 @@ class ValidateContactsJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    protected int $batchSize = 5; // Smaller batch for slow SMTP checks
-    protected int $maxExecutionTime = 50; // Max seconds to run (cron is 55s, leave buffer)
+    protected int $batchSize = 50; // Larger batch size since DB writes and DNS lookups are now cached/batched
+    protected int $maxExecutionTime = 20; // Tight burst to prevent cron overlap and CPU starvation
     protected float $startTime;
-    public int $uniqueFor = 3600; // 1 hour timeout for the unique lock
+    public int $uniqueFor = 300; // 5 minute timeout for the unique lock (prevents stuck locks on shared hosting)
 
 
     /**
      * Create a new job instance.
      */
-    public function __construct(public ContactList $contactList)
+    public function __construct(public ContactList $contactList, int $maxExecutionTime = 20)
     {
-        //
+        $this->maxExecutionTime = $maxExecutionTime;
     }
 
     /**
@@ -51,13 +51,20 @@ class ValidateContactsJob implements ShouldQueue, ShouldBeUnique
     {
         $this->startTime = microtime(true);
 
-        // Early exit: if no pending contacts, skip immediately to avoid wasting queue time
-        $pendingCount = $this->contactList->contacts()->pendingValidation()->count();
-        if ($pendingCount === 0) {
+        // Recover any contacts stuck in 'validating' status from an interrupted shared-hosting process (> 5 mins ago)
+        $this->contactList->contacts()
+            ->where('validation_status', Contact::STATUS_VALIDATING)
+            ->where('updated_at', '<', now()->subMinutes(5))
+            ->update(['validation_status' => Contact::STATUS_PENDING]);
+
+        // Early exit: if no pending contacts, skip immediately and clear has_pending_contacts flag
+        $hasPending = $this->contactList->contacts()->pendingValidation()->exists();
+        if (!$hasPending) {
+            if ($this->contactList->has_pending_contacts) {
+                $this->contactList->update(['has_pending_contacts' => false]);
+            }
             return;
         }
-        
-        Log::info("ValidateContactsJob: Server-side validation for list {$this->contactList->id} - {$this->contactList->name} ({$pendingCount} pending)");
 
         $validated = 0;
         $valid = 0;
@@ -66,15 +73,13 @@ class ValidateContactsJob implements ShouldQueue, ShouldBeUnique
 
         // Process pending contacts in batches
         while (true) {
-            // Check if we're running out of time
             if ($this->isTimeExceeded()) {
-                Log::info("ValidateContactsJob: Time limit reached for list {$this->contactList->id}. Processed {$validated} contacts. Will continue next run.");
                 break;
             }
 
             $contacts = $this->contactList->contacts()
                 ->pendingValidation()
-                ->oldest('updated_at')
+                ->orderBy('id', 'asc')
                 ->limit($this->batchSize)
                 ->get();
 
@@ -82,33 +87,46 @@ class ValidateContactsJob implements ShouldQueue, ShouldBeUnique
                 break;
             }
 
-            // Mark as validating
-            $contactIds = $contacts->pluck('id')->toArray();
+            // Mark batch as validating in 1 query
+            $contactIds = $contacts->pluck('id')->all();
             Contact::whereIn('id', $contactIds)->update(['validation_status' => Contact::STATUS_VALIDATING]);
 
-            // Pre-fetch cached results and blocklist for this batch
-            $emails = $contacts->pluck('email')->map(fn($e) => strtolower($e))->toArray();
-            
+            // Pre-fetch cached results and blocklist for this batch in 2 queries
+            $emails = $contacts->pluck('email')->map(fn($e) => strtolower(trim($e)))->unique()->values()->all();
+
             $cachedEmails = \App\Models\GlobalEmailCache::whereIn('email', $emails)->get()->keyBy('email');
-            
+
             $blocklistedEmails = \App\Models\InvalidEmail::where('user_id', $this->contactList->user_id)
                 ->whereIn('email', $emails)
                 ->get()
                 ->keyBy('email');
 
+            $now = now();
+            $nowString = $now->toDateTimeString();
+            $cacheRowsToUpsert = [];
+            $invalidEmailsToInsert = [];
+            $validCampaignSyncEmails = [];
+            $invalidCampaignSyncEmails = [];
+
             foreach ($contacts as $key => $contact) {
                 // Check if we're running out of time during a slow batch
                 if ($this->isTimeExceeded()) {
-                    $remainingIds = $contacts->slice($key)->pluck('id')->toArray();
+                    $remainingIds = $contacts->slice($key)->pluck('id')->all();
                     if (!empty($remainingIds)) {
                         Contact::whereIn('id', $remainingIds)->update(['validation_status' => Contact::STATUS_PENDING]);
                     }
-                    Log::info("ValidateContactsJob: Time limit reached inside batch for list {$this->contactList->id}. Reverted " . count($remainingIds) . " unprocessed contacts to pending.");
-                    break 2; // Break out of foreach and while loop
+                    $this->flushBatchSyncs(
+                        $cacheRowsToUpsert,
+                        $invalidEmailsToInsert,
+                        $validCampaignSyncEmails,
+                        $invalidCampaignSyncEmails,
+                        $nowString
+                    );
+                    break 2;
                 }
 
-                $contact->refresh();
-                $email = strtolower($contact->email);
+                $email = strtolower(trim($contact->email));
+                $fromCache = false;
 
                 // 1. Check if email is in the user's personal blocklist
                 if ($blocklistedEmails->has($email)) {
@@ -119,9 +137,8 @@ class ValidateContactsJob implements ShouldQueue, ShouldBeUnique
                 } else {
                     // 2. Lightning Fast Local Pre-check (Syntax & Typo & Role-based & Disposable)
                     $precheck = $validator->quickPrecheck($email);
-                    
+
                     if ($precheck !== false) {
-                        // It failed the quick local precheck
                         $mailboxResult = [
                             'status' => $precheck['status'],
                             'reason' => $precheck['reason'],
@@ -133,63 +150,68 @@ class ValidateContactsJob implements ShouldQueue, ShouldBeUnique
                             'status' => $cached->status,
                             'reason' => $cached->reason,
                         ];
+                        $fromCache = true;
                     } else {
-                        // 4. Call the Third-Party API directly
+                        // 4. Verify via API or cached DNS/MX fallback
                         $mailboxResult = $validator->verifyWithThirdPartyApi($email);
                     }
                 }
-                    
-                    // Save to cache if successful
-                    if (in_array($mailboxResult['status'], ['valid', 'invalid', 'risky', 'unknown'])) {
-                        \App\Models\GlobalEmailCache::updateOrCreate(
-                            ['email' => $email],
-                            [
-                                'status' => $mailboxResult['status'],
-                                'reason' => $mailboxResult['reason'] ?? null,
-                            ]
-                        );
-                    }
-                
+
+                // Queue for bulk cache upsert if not already read from cache
+                if (!$fromCache && in_array($mailboxResult['status'], ['valid', 'invalid', 'risky', 'unknown'], true)) {
+                    $cacheRowsToUpsert[$email] = [
+                        'email' => $email,
+                        'status' => $mailboxResult['status'],
+                        'reason' => $mailboxResult['reason'] ?? null,
+                        'created_at' => $nowString,
+                        'updated_at' => $nowString,
+                    ];
+                }
+
                 $validated++;
 
                 if ($mailboxResult['status'] === 'valid') {
-                    // Mailbox verified
                     $contact->markAsValid([
                         'verification_method' => 'third_party_api',
                         'note' => $mailboxResult['reason'] ?? null,
                     ]);
-                    $this->syncValidationToActiveCampaigns($email, 'valid', ['verification_method' => 'third_party_api'], $mailboxResult['reason'] ?? null);
+                    $validCampaignSyncEmails[] = $email;
                     $valid++;
                 } elseif ($mailboxResult['status'] === 'invalid') {
-                    // Mailbox doesn't exist or is invalid
+                    $reason = $mailboxResult['reason'] ?? 'Invalid email';
                     $contact->markAsInvalid([
                         'verification_method' => 'third_party_api',
-                    ], $mailboxResult['reason'] ?? 'Invalid email');
-                    $this->syncValidationToActiveCampaigns($email, 'invalid', ['verification_method' => 'third_party_api'], $mailboxResult['reason'] ?? 'Invalid email');
+                    ], $reason);
+                    $invalidEmailsToInsert[$email] = [
+                        'user_id' => $this->contactList->user_id,
+                        'email' => $email,
+                        'reason' => $reason,
+                        'detected_at' => $nowString,
+                        'created_at' => $nowString,
+                        'updated_at' => $nowString,
+                    ];
+                    $invalidCampaignSyncEmails[] = $email;
                     $invalid++;
-                } elseif (in_array($mailboxResult['status'], ['risky', 'unknown'])) {
-                    // Risky or unknown emails shouldn't be retried indefinitely
+                } elseif (in_array($mailboxResult['status'], ['risky', 'unknown'], true)) {
                     $contact->markAsValid([
                         'verification_method' => 'third_party_api',
                         'risky' => true,
                         'api_status' => $mailboxResult['status'],
                         'note' => $mailboxResult['reason'] ?? 'Risky / Unknown',
                     ]);
-                    $this->syncValidationToActiveCampaigns($email, $mailboxResult['status'], ['verification_method' => 'third_party_api', 'risky' => true], $mailboxResult['reason'] ?? 'Risky / Unknown');
+                    $validCampaignSyncEmails[] = $email;
                     $valid++;
                 } else {
-                    // Error (like connection failed) - Mark back as pending so it retries later
                     $attempts = ($contact->validation_result['attempts'] ?? 0) + 1;
-                    
+
                     if ($attempts >= 3) {
-                        // Stop retrying after 3 failed attempts to connect
                         $contact->markAsValid([
                             'verification_method' => 'third_party_api',
                             'risky' => true,
                             'api_status' => 'unknown',
                             'note' => 'Max connection retries exceeded (' . ($mailboxResult['reason'] ?? 'Connection failed') . ')',
                         ]);
-                        $this->syncValidationToActiveCampaigns($email, 'unknown', ['verification_method' => 'third_party_api', 'risky' => true], 'Max connection retries exceeded');
+                        $validCampaignSyncEmails[] = $email;
                         $valid++;
                     } else {
                         $contact->update([
@@ -204,14 +226,64 @@ class ValidateContactsJob implements ShouldQueue, ShouldBeUnique
                     }
                 }
             }
+
+            // Flush batch writes (GlobalEmailCache, InvalidEmail blocklist, and Campaign Recipients sync)
+            $this->flushBatchSyncs(
+                $cacheRowsToUpsert,
+                $invalidEmailsToInsert,
+                $validCampaignSyncEmails,
+                $invalidCampaignSyncEmails,
+                $nowString
+            );
         }
 
-        Log::info("ValidateContactsJob: List {$this->contactList->id} - Verified: {$validated}, Valid: {$valid}, Invalid: {$invalid}, Skipped: {$skipped}");
+        // Update has_pending_contacts flag using fast exists() check
+        $stillHasPending = $this->contactList->contacts()->pendingValidation()->exists();
+        if ($this->contactList->has_pending_contacts !== $stillHasPending) {
+            $this->contactList->update(['has_pending_contacts' => $stillHasPending]);
+        }
 
-        // Log remaining count for visibility (scheduler handles re-dispatching)
-        $remainingPending = $this->contactList->contacts()->pendingValidation()->count();
-        if ($remainingPending > 0) {
-            Log::info("ValidateContactsJob: List {$this->contactList->id} has {$remainingPending} contacts left. Scheduler will dispatch next batch.");
+        if ($validated > 0) {
+            Log::info("ValidateContactsJob: List {$this->contactList->id} - Verified: {$validated}, Valid: {$valid}, Invalid: {$invalid}, Skipped: {$skipped}, HasMorePending: " . ($stillHasPending ? 'yes' : 'no'));
+        }
+    }
+
+    /**
+     * Flush batched cache upserts, blocklist inserts, and campaign recipient syncs in minimal SQL queries.
+     */
+    protected function flushBatchSyncs(
+        array $cacheRowsToUpsert,
+        array $invalidEmailsToInsert,
+        array $validCampaignSyncEmails,
+        array $invalidCampaignSyncEmails,
+        string $nowString
+    ): void {
+        if (!empty($cacheRowsToUpsert)) {
+            \App\Models\GlobalEmailCache::upsert(
+                array_values($cacheRowsToUpsert),
+                ['email'],
+                ['status', 'reason', 'updated_at']
+            );
+        }
+
+        if (!empty($invalidEmailsToInsert)) {
+            \Illuminate\Support\Facades\DB::table('invalid_emails')->insertOrIgnore(array_values($invalidEmailsToInsert));
+        }
+
+        if (!empty($validCampaignSyncEmails)) {
+            \App\Models\Recipient::whereIn('email', array_unique($validCampaignSyncEmails))
+                ->whereIn('status', [\App\Models\Recipient::STATUS_PENDING, \App\Models\Recipient::STATUS_VALIDATING])
+                ->update([
+                    'status' => \App\Models\Recipient::STATUS_VALID,
+                    'validated_at' => $nowString,
+                    'updated_at' => $nowString,
+                ]);
+        }
+
+        if (!empty($invalidCampaignSyncEmails)) {
+            \App\Models\Recipient::whereIn('email', array_unique($invalidCampaignSyncEmails))
+                ->whereIn('status', [\App\Models\Recipient::STATUS_PENDING, \App\Models\Recipient::STATUS_VALIDATING])
+                ->delete();
         }
     }
 

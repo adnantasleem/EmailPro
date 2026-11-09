@@ -13,14 +13,24 @@ class ImapProcessorService
 {
     /**
      * Process bounces and replies for a given SMTP config.
+     *
+     * @param SmtpConfig $smtp
+     * @param int $maxMessages Maximum messages to process per check to prevent memory/timeout exhaustion
+     * @param bool $throwOnError Whether to rethrow connection/folder errors (e.g. for manual UI sync feedback)
      */
-    public function processInbox(SmtpConfig $smtp): int
+    public function processInbox(SmtpConfig $smtp, int $maxMessages = 25, bool $throwOnError = false): int
     {
+        // Always update last_bounce_check_at first so a failing/unreachable IMAP server rotates to the back of the queue
+        $smtp->update(['last_bounce_check_at' => now()]);
+
         try {
             $client = $this->connectToImap($smtp);
             $client->connect();
         } catch (\Exception $e) {
             Log::error("ImapProcessorService: Failed to connect to IMAP for SMTP {$smtp->id}: " . $e->getMessage());
+            if ($throwOnError) {
+                throw $e;
+            }
             return 0;
         }
 
@@ -36,7 +46,6 @@ class ImapProcessorService
                     $folders = $client->getFolders(false);
                     foreach ($folders as $f) {
                         $availableFolders[] = $f->path;
-                        // Try case-insensitive match
                         if (strtolower($f->name) === strtolower($folderName) || strtolower($f->path) === strtolower($folderName)) {
                             $folder = $f;
                         }
@@ -47,19 +56,60 @@ class ImapProcessorService
                 
                 if (!$folder) {
                     $foldersStr = !empty($availableFolders) ? implode(', ', $availableFolders) : 'None';
-                    Log::error("ImapProcessorService: Folder '{$folderName}' not found for SMTP {$smtp->id}. Available folders: {$foldersStr}");
+                    $errMsg = "Folder '{$folderName}' not found for SMTP {$smtp->id}. Available folders: {$foldersStr}";
+                    Log::error("ImapProcessorService: {$errMsg}");
                     $client->disconnect();
+                    if ($throwOnError) {
+                        throw new \RuntimeException($errMsg);
+                    }
                     return 0;
                 }
             }
             
-            // Search for UNSEEN emails
-            $messages = $folder->query()->unseen()->get();
+            // Load processed message UIDs for this SMTP so we can safely inspect recent messages (even if already marked Seen in webmail/phone)
+            $processedUidsKey = "imap_processed_uids:{$smtp->id}";
+            $processedUids = \Illuminate\Support\Facades\Cache::get($processedUidsKey, []);
+            $processedUidsMap = array_flip($processedUids);
+            $uidsModified = false;
+
+            // Search recent emails from last 3 days (both Seen & Unseen so webmail-opened replies/bounces are never missed)
+            try {
+                $query = $folder->query()->since(now()->subDays(3));
+                if (method_exists($query, 'setFetchAttachment')) {
+                    $query->setFetchAttachment(false);
+                }
+                if (method_exists($query, 'limit')) {
+                    $query->limit($maxMessages);
+                }
+                $messages = $query->get();
+            } catch (\Throwable $queryErr) {
+                // Fallback to unseen() if the IMAP server rejects the since() query
+                $query = $folder->query()->unseen();
+                if (method_exists($query, 'setFetchAttachment')) {
+                    $query->setFetchAttachment(false);
+                }
+                if (method_exists($query, 'limit')) {
+                    $query->limit($maxMessages);
+                }
+                $messages = $query->get();
+            }
             
+            $smtpOwnEmails = array_filter([
+                strtolower(trim($smtp->from_email ?? '')),
+                strtolower(trim($smtp->username ?? '')),
+            ]);
+
             foreach ($messages as $message) {
                 try {
+                    $uid = method_exists($message, 'getUid') ? (string) $message->getUid() : null;
+                    if ($uid && isset($processedUidsMap[$uid])) {
+                        continue;
+                    }
+
                     $headerRaw = $message->getHeader()->raw ?? '';
-                    $body = $message->hasHTMLBody() ? $message->getHTMLBody() : ($message->hasTextBody() ? $message->getTextBody() : '');
+                    $htmlBody = $message->hasHTMLBody() ? $message->getHTMLBody() : null;
+                    $textBody = $message->hasTextBody() ? $message->getTextBody() : ($htmlBody ? trim(strip_tags($htmlBody)) : '');
+                    $combinedBody = ($htmlBody ?: '') . "\n" . ($textBody ?: '');
                     
                     // Safely extract From address
                     $fromObj = null;
@@ -113,43 +163,52 @@ class ImapProcessorService
                     ];
                     $headerInfo->subject = (string) $message->getSubject();
                     
-                    if ($this->isBounceEmail($headerInfo, $headerRaw, $body)) {
-                        $bouncedEmail = $this->extractBouncedAddress($headerRaw, $body);
+                    if ($this->isBounceEmail($headerInfo, $headerRaw, $combinedBody)) {
+                        $bouncedEmail = $this->extractBouncedAddress($headerRaw, $combinedBody, $smtp);
                         
                         if ($bouncedEmail) {
                             $this->handleBouncedAddress($smtp, $bouncedEmail);
                             $emailsProcessed++;
                         }
                     } else {
-                        // It's not a bounce. Is it a reply?
-                        if (filter_var($fromFullEmail, FILTER_VALIDATE_EMAIL)) {
-                            $wasReply = $this->handleReplyAddress($smtp, $fromFullEmail, $headerInfo->subject, $body, $message->hasHTMLBody() ? $message->getHTMLBody() : null);
+                        // Ignore self-test emails sent from the SMTP account itself
+                        if (!in_array($fromFullEmail, $smtpOwnEmails, true) && filter_var($fromFullEmail, FILTER_VALIDATE_EMAIL)) {
+                            $wasReply = $this->handleReplyAddress($smtp, $fromFullEmail, $headerInfo->subject, $textBody, $htmlBody);
                             if ($wasReply) {
                                 $emailsProcessed++;
                             }
-                        } else {
-                            Log::warning("ImapProcessorService: Ignored non-bounce message with invalid sender '{$fromFullEmail}' on SMTP {$smtp->id}");
                         }
                     }
                     
-                    // Mark as seen so we don't process it again
+                    // Mark as seen and record UID in cache so we never re-process this message
+                    if ($uid) {
+                        $processedUidsMap[$uid] = true;
+                        $uidsModified = true;
+                    }
                     try {
                         $message->setFlag('Seen');
                     } catch (\Throwable $e) {
-                        Log::warning("ImapProcessorService: Could not set Seen flag for message on SMTP {$smtp->id}: " . $e->getMessage());
+                        // Non-fatal if folder is read-only; UID cache prevents re-processing
                     }
                     
                 } catch (\Exception $e) {
                     Log::error("ImapProcessorService: Error processing email for SMTP {$smtp->id}: " . $e->getMessage());
                 }
             }
+
+            if ($uidsModified) {
+                // Keep most recent 500 UIDs per SMTP for 7 days
+                $updatedUids = array_slice(array_keys($processedUidsMap), -500);
+                \Illuminate\Support\Facades\Cache::put($processedUidsKey, $updatedUids, 86400 * 7);
+            }
             
             $client->disconnect();
         } catch (\Exception $e) {
             Log::error("ImapProcessorService: Error during mailbox operations for SMTP {$smtp->id}: " . $e->getMessage());
+            if ($throwOnError) {
+                throw $e;
+            }
         }
-        
-        $smtp->update(['last_bounce_check_at' => now()]);
         
         if ($emailsProcessed > 0) {
             Log::info("ImapProcessorService: Processed {$emailsProcessed} emails for SMTP {$smtp->id}.");
@@ -159,7 +218,7 @@ class ImapProcessorService
     }
 
     /**
-     * Connect to the IMAP mailbox using pure PHP IMAP library.
+     * Connect to the IMAP mailbox using pure PHP IMAP library with strict shared-hosting timeout.
      */
     protected function connectToImap(SmtpConfig $smtp)
     {
@@ -176,7 +235,8 @@ class ImapProcessorService
             'validate_cert' => false,
             'username'      => $smtp->username,
             'password'      => $smtp->decrypted_imap_password,
-            'protocol'      => 'imap'
+            'protocol'      => 'imap',
+            'timeout'       => 8,
         ]);
 
         return $client;
@@ -214,9 +274,14 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
             'no-reply',
             'noreply',
         ];
-        if (in_array($fromAddress, $daemonNames)) {
+        if (in_array($fromAddress, $daemonNames, true) || str_contains($fromAddress, 'mailer-daemon') || str_contains($fromAddress, 'postmaster')) {
             return true;
         }
+    }
+
+    // --- STRONG SIGNAL 3: Standard RFC 3464 / 3463 DSN body markers ---
+    if (preg_match('/(?:Final-Recipient:\s*rfc822;|Diagnostic-Code:\s*smtp;\s*5\d\d|Action:\s*failed|Status:\s*5\.\d+\.\d+)/i', $body)) {
+        return true;
     }
 
     // --- WEAKER SIGNAL: Subject phrase match ---
@@ -256,7 +321,7 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
     /**
      * Extract the original intended recipient from the bounce message.
      */
-    protected function extractBouncedAddress(string $header, string $body): ?string
+    protected function extractBouncedAddress(string $header, string $body, ?SmtpConfig $smtp = null): ?string
     {
         // 1. Try to find Final-Recipient in the body (standard DSN format)
         if (preg_match('/Final-Recipient:\s*rfc822;\s*([^\s]+)/i', $body, $matches)) {
@@ -288,26 +353,29 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
              if (filter_var($email, FILTER_VALIDATE_EMAIL)) return strtolower($email);
         }
 
-        // 6. AGGRESSIVE CATCH-ALL FALLBACK
-        // Especially useful for forwarded bounces (Fwd: ) where original headers are destroyed.
-        // We find all emails in the body, and return the first one that exists in the DB 
-        // as a 'sent' or 'failed' recipient for this user.
+        // 6. CATCH-ALL FALLBACK using a single WHERE IN query instead of N+1 queries
         if (preg_match_all('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/', $body, $matches)) {
-            $foundEmails = array_unique($matches[0]);
-            
-            foreach ($foundEmails as $email) {
-                $email = strtolower(trim($email));
-                if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                    
-                    // Check if this email actually exists in the database as a recipient that was sent to
-                    // This filters out the sender's own email, postmaster emails, etc.
-                    $exists = \App\Models\Recipient::where('email', $email)
-                        ->whereIn('status', [\App\Models\Recipient::STATUS_SENT, \App\Models\Recipient::STATUS_FAILED])
-                        ->exists();
-                        
-                    if ($exists) {
-                        return $email;
-                    }
+            $excluded = [];
+            if ($smtp) {
+                if (!empty($smtp->from_email)) $excluded[strtolower($smtp->from_email)] = true;
+                if (!empty($smtp->username)) $excluded[strtolower($smtp->username)] = true;
+            }
+
+            $candidates = [];
+            foreach (array_unique($matches[0]) as $rawEmail) {
+                $candidate = strtolower(trim($rawEmail));
+                if (!isset($excluded[$candidate]) && filter_var($candidate, FILTER_VALIDATE_EMAIL)) {
+                    $candidates[] = $candidate;
+                }
+            }
+
+            if (!empty($candidates)) {
+                $matched = \App\Models\Recipient::whereIn('email', array_slice($candidates, 0, 50))
+                    ->whereIn('status', [\App\Models\Recipient::STATUS_SENT, \App\Models\Recipient::STATUS_FAILED])
+                    ->value('email');
+
+                if ($matched) {
+                    return strtolower($matched);
                 }
             }
         }
@@ -320,34 +388,28 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
      */
     protected function handleBouncedAddress(SmtpConfig $smtp, string $email): void
     {
+        $email = strtolower(trim($email));
+
         DB::transaction(function () use ($smtp, $email) {
-            // 1. Find all recipients for this user's campaigns that were sent to this email
-            // and are currently in a 'sent' or 'failed' state (maybe temporary fail).
-            // We update them to 'bounced'.
-            
-            // Note: A user might send to the same email in multiple campaigns.
-            // If it bounced now, it's generally safe to mark it bounced in active/recent campaigns.
-            
-            $bouncedRecipients = Recipient::whereHas('campaign', function ($q) use ($smtp) {
-                    $q->where('user_id', $smtp->user_id);
-                })
+            $bouncedRecipientIds = Recipient::whereIn(
+                    'campaign_id',
+                    \App\Models\Campaign::where('user_id', $smtp->user_id)->select('id')
+                )
                 ->where('email', $email)
                 ->whereIn('status', [Recipient::STATUS_SENT, Recipient::STATUS_FAILED])
-                ->get();
+                ->pluck('id')
+                ->all();
 
             $updated = 0;
-            if ($bouncedRecipients->isNotEmpty()) {
-                $recipientIds = $bouncedRecipients->pluck('id')->toArray();
-
-                $updated = Recipient::whereIn('id', $recipientIds)
+            if (!empty($bouncedRecipientIds)) {
+                $updated = Recipient::whereIn('id', $bouncedRecipientIds)
                     ->update([
                         'status' => Recipient::STATUS_BOUNCED,
                         'error_message' => 'IMAP Bounce Detected: Delivery failed.',
                         'smtp_config_id' => DB::raw('COALESCE(smtp_config_id, ' . (int) $smtp->id . ')'),
                     ]);
 
-                // Also update corresponding EmailLog entries to bounced
-                \App\Models\EmailLog::whereIn('recipient_id', $recipientIds)
+                \App\Models\EmailLog::whereIn('recipient_id', $bouncedRecipientIds)
                     ->update([
                         'status' => \App\Models\EmailLog::STATUS_BOUNCED,
                         'error_message' => 'IMAP Bounce Detected: Delivery failed.',
@@ -355,24 +417,21 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
             }
 
             if ($updated > 0) {
-                // Add to invalid emails blocklist so it's not mailed again
                 InvalidEmail::addEmail($smtp->user_id, $email, 'Hard Bounce via IMAP');
-                
-                // Also mark the contact in the user's contact lists as invalid
-                $contactsUpdated = \App\Models\Contact::whereHas('contactList', function ($q) use ($smtp) {
-                    $q->where('user_id', $smtp->user_id);
-                })
-                ->where('email', $email)
-                ->update([
-                    'validation_status' => \App\Models\Contact::STATUS_INVALID,
-                    'validation_error' => 'Hard Bounce via IMAP',
-                    'validated_at' => now(),
-                ]);
-                
-                // Record the bounce on the SMTP config for tracking limits/pausing
-                // We only count it once even if it updated multiple recipient records
+
+                \App\Models\Contact::whereIn(
+                        'contact_list_id',
+                        \App\Models\ContactList::where('user_id', $smtp->user_id)->select('id')
+                    )
+                    ->where('email', $email)
+                    ->update([
+                        'validation_status' => \App\Models\Contact::STATUS_INVALID,
+                        'validation_error' => 'Hard Bounce via IMAP',
+                        'validated_at' => now(),
+                    ]);
+
                 $smtp->recordBounce(true);
-                
+
                 Log::info("ImapProcessorService: Marked {$email} as bounced for user {$smtp->user_id} (updated {$updated} recipient records).");
             }
         });
@@ -384,16 +443,15 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
     protected function handleReplyAddress(SmtpConfig $smtp, string $email, string $subject, string $bodyText, ?string $bodyHtml): bool
     {
         $wasReply = false;
+        $email = strtolower(trim($email));
         
         DB::transaction(function () use ($smtp, $email, $subject, $bodyText, $bodyHtml, &$wasReply) {
-            // Find the most recent recipient in any campaign for this user with case-insensitive email match
-            $recipient = Recipient::whereHas('campaign', function ($q) use ($smtp) {
-                    $q->where('user_id', $smtp->user_id);
-                })
-                ->where(function ($q) use ($email) {
-                    $q->where('email', $email)
-                      ->orWhereRaw('LOWER(email) = ?', [strtolower($email)]);
-                })
+            // Find the most recent recipient in any campaign for this user using indexed lowercase email lookup
+            $recipient = Recipient::whereIn(
+                    'campaign_id',
+                    \App\Models\Campaign::where('user_id', $smtp->user_id)->select('id')
+                )
+                ->where('email', $email)
                 ->orderByRaw("CASE WHEN status IN ('sent', 'replied') THEN 0 ELSE 1 END")
                 ->orderBy('sent_at', 'desc')
                 ->orderBy('updated_at', 'desc')

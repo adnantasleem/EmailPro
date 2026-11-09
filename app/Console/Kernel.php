@@ -2,9 +2,12 @@
 
 namespace App\Console;
 
+use App\Jobs\ProcessImapInboxJob;
+use App\Jobs\SendEmailsJob;
 use App\Jobs\ValidateContactsJob;
-use App\Models\ContactList;
+use App\Jobs\ValidateEmailsJob;
 use App\Models\Contact;
+use App\Models\ContactList;
 use App\Models\SmtpConfig;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
@@ -14,42 +17,86 @@ class Kernel extends ConsoleKernel
 {
     /**
      * Define the application's command schedule.
+     *
+     * Designed for Shared Hosting:
+     * - All tasks run synchronously inside `schedule:run` with strict dynamic time budgets
+     *   so no background `queue:work` daemon or Supervisor process is required.
+     * - Total execution time across all tasks in a single minute is capped below 52 seconds.
+     * - Short `withoutOverlapping(3)` locks ensure automatic recovery within minutes if
+     *   a process is ever terminated by shared hosting LVE/CPU limits.
      */
     protected function schedule(Schedule $schedule): void
     {
-        // Send emails every minute
-        $schedule->job(new \App\Jobs\SendEmailsJob())
+        $cronStart = defined('LARAVEL_START') ? (float) LARAVEL_START : microtime(true);
+
+        // 1. Send emails every minute (up to 25s budget; exits in <10ms if no campaign is sending)
+        $schedule->call(function () use ($cronStart) {
+            $elapsed = microtime(true) - $cronStart;
+            $budget = (int) min(25, max(5, floor(50 - $elapsed)));
+            SendEmailsJob::dispatchSync($budget);
+        })
             ->everyMinute()
             ->name('send-emails')
-            ->withoutOverlapping();
+            ->withoutOverlapping(2);
 
-        // Process IMAP inbox (bounces and replies) every 5 minutes
-        // We run this synchronously via schedule->call so it executes reliably on both
-        // VPS/CloudPanel and Shared Hosting (where persistent queue workers often cannot run).
-        $schedule->call(function (\App\Services\ImapProcessorService $processor) {
-            $smtps = SmtpConfig::where('is_active', true)
-                ->where('bounce_check_enabled', true)
-                ->orderBy('last_bounce_check_at', 'asc')
+        // 2. Validate pending contacts & campaign recipients every minute (up to 18s global budget)
+        // Uses the indexed `has_pending_contacts` flag so it takes <1ms when idle.
+        $schedule->call(function () use ($cronStart) {
+            $elapsed = microtime(true) - $cronStart;
+            $globalBudget = (int) min(18, max(0, floor(48 - $elapsed)));
+            if ($globalBudget < 3) {
+                return;
+            }
+
+            $validationStart = microtime(true);
+
+            // Query contact lists with pending contacts using index flag (instant check)
+            $listsWithPending = ContactList::where('has_pending_contacts', true)
+                ->orderBy('updated_at', 'asc')
+                ->limit(5)
                 ->get();
 
-            foreach ($smtps as $smtp) {
-                try {
-                    $processor->processInbox($smtp);
-                } catch (\Throwable $e) {
-                    Log::error("Scheduler IMAP error for SMTP {$smtp->id}: " . $e->getMessage());
+            if ($listsWithPending->isNotEmpty()) {
+                // Also recover any stuck 'validating' contacts (> 5 minutes old)
+                Contact::where('validation_status', Contact::STATUS_VALIDATING)
+                    ->where('updated_at', '<', now()->subMinutes(5))
+                    ->update(['validation_status' => Contact::STATUS_PENDING]);
+
+                foreach ($listsWithPending as $contactList) {
+                    $remainingBudget = (int) floor($globalBudget - (microtime(true) - $validationStart));
+                    if ($remainingBudget < 2) {
+                        break;
+                    }
+                    ValidateContactsJob::dispatchSync($contactList, $remainingBudget);
                 }
             }
+
+            // If time remains in the validation budget, validate any direct campaign recipients
+            $remainingBudget = (int) floor($globalBudget - (microtime(true) - $validationStart));
+            if ($remainingBudget >= 3) {
+                ValidateEmailsJob::dispatchSync($remainingBudget);
+            }
+        })
+            ->everyMinute()
+            ->name('validate-pending-contacts')
+            ->withoutOverlapping(3);
+
+        // 3. Process IMAP inbox (bounces and replies) every 5 minutes (up to 15s budget, round-robin)
+        $schedule->call(function () use ($cronStart) {
+            $elapsed = microtime(true) - $cronStart;
+            $budget = (int) min(15, max(4, floor(52 - $elapsed)));
+            ProcessImapInboxJob::dispatchSync($budget);
         })
             ->everyFiveMinutes()
             ->name('process-imap-inbox')
-            ->withoutOverlapping();
+            ->withoutOverlapping(5);
 
-        // Daily reset of SMTP quotas and auto-resuming of paused campaigns
+        // 4. Daily reset of SMTP quotas and auto-resuming of paused campaigns
         $schedule->call(function (\App\Services\SmtpSelectorService $smtpSelector) {
             $smtpSelector->resetAllCounters();
         })->daily()->name('reset-smtp-quotas');
 
-        // Auto-resume SMTPs that were paused due to high bounce rate after 24 hours
+        // 5. Auto-resume SMTPs that were paused due to high bounce rate after 24 hours
         $schedule->call(function () {
             $pausedSmtps = SmtpConfig::where('auto_paused', true)
                 ->whereNotNull('paused_at')
@@ -60,44 +107,7 @@ class Kernel extends ConsoleKernel
                 $smtp->autoResume();
                 Log::info("Scheduler: Auto-resumed SMTP [{$smtp->name}] (ID: {$smtp->id}) after 24-hour pause period.");
             }
-
-            if ($pausedSmtps->isNotEmpty()) {
-                Log::info("Scheduler: Auto-resumed {$pausedSmtps->count()} SMTP(s) after 24-hour bounce pause.");
-            }
         })->hourly()->name('auto-resume-paused-smtps');
-
-        // Validate pending contacts every minute
-        // This ensures large contact lists continue to be validated
-        $schedule->call(function () {
-            // First, reset any contacts stuck in 'validating' status for more than 5 minutes
-            // This handles cases where the job crashed/timed out mid-process
-            $stuckCount = Contact::where('validation_status', Contact::STATUS_VALIDATING)
-                ->where('updated_at', '<', now()->subMinutes(5))
-                ->update(['validation_status' => Contact::STATUS_PENDING]);
-            
-            if ($stuckCount > 0) {
-                Log::info("Scheduler: Reset {$stuckCount} stuck validating contacts back to pending");
-            }
-
-            // Find all contact lists that have pending contacts
-            $listsWithPending = ContactList::whereHas('contacts', function ($query) {
-                $query->where('validation_status', Contact::STATUS_PENDING);
-            })->get();
-
-            foreach ($listsWithPending as $contactList) {
-                $pendingCount = $contactList->contacts()
-                    ->where('validation_status', Contact::STATUS_PENDING)
-                    ->count();
-
-                if ($pendingCount > 0) {
-                    Log::info("Scheduler: Dispatching ValidateContactsJob for list {$contactList->id} ({$contactList->name}) - {$pendingCount} pending contacts");
-                    ValidateContactsJob::dispatch($contactList);
-                }
-            }
-        })
-            ->everyMinute()
-            ->name('validate-pending-contacts')
-            ->withoutOverlapping();
     }
 
     /**

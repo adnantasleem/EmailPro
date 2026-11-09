@@ -18,6 +18,12 @@ class EmailSenderService
 {
     protected SmtpSelectorService $smtpSelector;
     protected ContentRotatorService $contentRotator;
+
+    /**
+     * Cached Symfony Mailer instances keyed by SMTP ID to reuse connections within a job cycle.
+     */
+    protected array $mailers = [];
+
     public function __construct(
         SmtpSelectorService $smtpSelector,
         ContentRotatorService $contentRotator
@@ -29,7 +35,7 @@ class EmailSenderService
     /**
      * Send an email to a recipient with full rotation and logging.
      */
-    public function sendEmail(Campaign $campaign, Recipient $recipient): array
+    public function sendEmail(Campaign $campaign, Recipient $recipient, ?SmtpConfig $smtp = null): array
     {
         $result = [
             'success' => false,
@@ -57,29 +63,33 @@ class EmailSenderService
                 }
             }
 
-            // Select random SMTP allowed for this campaign
-            $smtp = $this->smtpSelector->selectSmtpForCampaign($campaign);
+            // Use pre-selected SMTP or select a random one allowed for this campaign
+            $smtp = $smtp ?? $this->smtpSelector->selectSmtpForCampaign($campaign);
             if (!$smtp) {
                 throw new Exception('No available SMTP accounts');
             }
             $result['smtp_id'] = $smtp->id;
 
-            // Select random subject
+            // Select random subject (uses eager-loaded relation when available)
             $subject = $this->contentRotator->getRandomSubject($campaign);
             if (!$subject) {
                 throw new Exception('No subject lines configured');
             }
             $result['subject_id'] = $subject->id;
 
-            // Select random body
+            // Select random body (uses eager-loaded relation when available)
             $body = $this->contentRotator->getRandomBody($campaign);
             if (!$body) {
                 throw new Exception('No body templates configured');
             }
             $result['body_id'] = $body->id;
 
-            // Delays are now handled implicitly by the SendEmailsJob loop checking SMTP cooldowns
             $result['delay_applied'] = 0;
+
+            // Pre-assign unsubscribe_token in memory if missing so getUnsubscribeUrl() doesn't run a separate SAVE query
+            if (!$recipient->unsubscribe_token) {
+                $recipient->unsubscribe_token = bin2hex(random_bytes(32));
+            }
 
             // Prepare email content with variable replacement
             $unsubscribeUrl = $recipient->getUnsubscribeUrl();
@@ -94,11 +104,12 @@ class EmailSenderService
                 $htmlContent .= $trackingPixel;
             }
 
-            // Send the email
-            $this->dispatchEmail($campaign, $smtp, $recipient, $subject->subject, $htmlContent, $plainContent);
+            // Send the email with RFC 8058 List-Unsubscribe headers
+            $this->dispatchEmail($campaign, $smtp, $recipient, $subject->subject, $htmlContent, $plainContent, $unsubscribeUrl);
 
-            // Update counters and logs (use recordSend for bounce tracking)
+            // Update counters and logs in minimal queries
             $smtp->recordSend();
+            $user?->incrementCachedSentCounts(1);
             $this->contentRotator->trackUsage($subject, $body);
             $recipient->markAsSent($smtp->id);
 
@@ -109,6 +120,11 @@ class EmailSenderService
         } catch (Exception $e) {
             $errorMsg = $e->getMessage();
             $result['error'] = $errorMsg;
+
+            // Drop cached mailer on transport error so next attempt reconnects cleanly
+            if (isset($smtp)) {
+                unset($this->mailers[$smtp->id]);
+            }
 
             $isBounce = Recipient::isBounceError($errorMsg);
             $smtpId = isset($smtp) ? $smtp->id : null;
@@ -129,8 +145,8 @@ class EmailSenderService
             }
 
             // Don't mark recipient as failed if it's a quota/capacity issue
-            if ($errorMsg === 'No available SMTP accounts' || str_starts_with($errorMsg, 'Monthly email limit reached')) {
-                // Return success=false but keep recipient in pending/valid state for later
+            if ($errorMsg === 'No available SMTP accounts' || str_starts_with($errorMsg, 'Monthly email limit reached') || str_starts_with($errorMsg, 'Daily email limit reached') || str_starts_with($errorMsg, 'Yearly email limit reached')) {
+                // Keep recipient in valid state for later
             } elseif ($isBounce) {
                 $recipient->markAsBounced($errorMsg, $smtpId);
             } else {
@@ -142,7 +158,7 @@ class EmailSenderService
     }
 
     /**
-     * Actually dispatch the email using the specified SMTP.
+     * Actually dispatch the email using the specified SMTP (reusing transport per SMTP ID).
      */
     protected function dispatchEmail(
         Campaign $campaign,
@@ -150,37 +166,38 @@ class EmailSenderService
         Recipient $recipient,
         string $subject,
         string $htmlContent,
-        string $plainContent
+        string $plainContent,
+        ?string $unsubscribeUrl = null
     ): void {
-        // Build DSN based on encryption type
-        // ssl = smtps:// (port 465)
-        // tls = smtp:// with STARTTLS (port 587)
-        // null = smtp:// without encryption
-        
-        $encryption = strtolower($smtp->encryption ?? '');
-        
-        if ($encryption === 'ssl') {
-            // SSL uses smtps:// protocol
-            $dsn = sprintf(
-                'smtps://%s:%s@%s:%d',
-                urlencode($smtp->username),
-                urlencode($smtp->decrypted_password),
-                $smtp->host,
-                $smtp->port
-            );
-        } else {
-            // TLS or no encryption uses smtp://
-            $dsn = sprintf(
-                'smtp://%s:%s@%s:%d',
-                urlencode($smtp->username),
-                urlencode($smtp->decrypted_password),
-                $smtp->host,
-                $smtp->port
-            );
+        if (!isset($this->mailers[$smtp->id])) {
+            $encryption = strtolower($smtp->encryption ?? '');
+
+            if ($encryption === 'ssl') {
+                $dsn = sprintf(
+                    'smtps://%s:%s@%s:%d?verify_peer=0',
+                    urlencode($smtp->username),
+                    urlencode($smtp->decrypted_password),
+                    $smtp->host,
+                    $smtp->port
+                );
+            } else {
+                $dsn = sprintf(
+                    'smtp://%s:%s@%s:%d?verify_peer=0',
+                    urlencode($smtp->username),
+                    urlencode($smtp->decrypted_password),
+                    $smtp->host,
+                    $smtp->port
+                );
+            }
+
+            $transport = \Symfony\Component\Mailer\Transport::fromDsn($dsn);
+            if ($transport instanceof \Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport) {
+                $transport->getStream()->setTimeout(15);
+            }
+            $this->mailers[$smtp->id] = new \Symfony\Component\Mailer\Mailer($transport);
         }
 
-        $transport = \Symfony\Component\Mailer\Transport::fromDsn($dsn);
-        $mailer = new \Symfony\Component\Mailer\Mailer($transport);
+        $mailer = $this->mailers[$smtp->id];
 
         // Determine From Name: Campaign > SMTP default
         $fromName = !empty($campaign->from_name) ? $campaign->from_name : $smtp->from_name;
@@ -196,6 +213,13 @@ class EmailSenderService
         // Add Reply-To header if set in campaign
         if (!empty($campaign->reply_to)) {
             $email->replyTo($campaign->reply_to);
+        }
+
+        // Add RFC 8058 List-Unsubscribe & One-Click headers to protect SMTP reputation with Gmail/Yahoo/Outlook
+        if (!empty($unsubscribeUrl) && str_starts_with($unsubscribeUrl, 'http')) {
+            $headers = $email->getHeaders();
+            $headers->addTextHeader('List-Unsubscribe', '<' . $unsubscribeUrl . '>');
+            $headers->addTextHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
         }
 
         // Send

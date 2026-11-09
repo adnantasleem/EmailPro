@@ -325,38 +325,70 @@ class EmailValidatorService
     }
 
     /**
-     * Check if domain exists using DNS lookup.
+     * In-memory cache of domain MX/DNS validity across a job run.
+     * Pre-seeded with major global email providers to avoid network DNS calls.
+     */
+    protected static array $domainMxCache = [
+        'gmail.com' => true,
+        'googlemail.com' => true,
+        'outlook.com' => true,
+        'hotmail.com' => true,
+        'live.com' => true,
+        'msn.com' => true,
+        'yahoo.com' => true,
+        'ymail.com' => true,
+        'icloud.com' => true,
+        'me.com' => true,
+        'aol.com' => true,
+        'protonmail.com' => true,
+        'proton.me' => true,
+        'zoho.com' => true,
+        'gmx.com' => true,
+        'mail.com' => true,
+    ];
+
+    /**
+     * Check if domain exists using DNS lookup (cached per domain).
      */
     protected function checkDomainExists(string $domain): bool
     {
-        // First check if there are any DNS records
-        $records = @dns_get_record($domain, DNS_A | DNS_AAAA);
-        
-        if ($records && count($records) > 0) {
-            return true;
-        }
-
-        // Also check for MX as some domains only have MX records
-        $mxRecords = @dns_get_record($domain, DNS_MX);
-        
-        return $mxRecords && count($mxRecords) > 0;
+        return $this->checkMxRecords($domain);
     }
 
     /**
-     * Check if domain has MX records.
+     * Check if domain has MX or A records (cached in memory + Laravel Cache).
      */
     protected function checkMxRecords(string $domain): bool
     {
-        $mxhosts = [];
-        $weights = [];
-        
-        if (@getmxrr($domain, $mxhosts, $weights)) {
-            return count($mxhosts) > 0;
+        $domain = strtolower(trim($domain));
+        if ($domain === '') {
+            return false;
         }
 
-        // Some domains use A record as fallback
-        $records = @dns_get_record($domain, DNS_A);
-        return $records && count($records) > 0;
+        if (isset(self::$domainMxCache[$domain])) {
+            return self::$domainMxCache[$domain];
+        }
+
+        $hasRecords = \Illuminate\Support\Facades\Cache::remember("domain_mx:{$domain}", 3600, function () use ($domain) {
+            $mxhosts = [];
+            $weights = [];
+
+            if (@getmxrr($domain, $mxhosts, $weights) && count($mxhosts) > 0) {
+                return true;
+            }
+
+            $mxRecords = @dns_get_record($domain, DNS_MX);
+            if ($mxRecords && count($mxRecords) > 0) {
+                return true;
+            }
+
+            // Some domains use A/AAAA record as fallback
+            $records = @dns_get_record($domain, DNS_A | DNS_AAAA);
+            return $records && count($records) > 0;
+        });
+
+        self::$domainMxCache[$domain] = (bool) $hasRecords;
+        return self::$domainMxCache[$domain];
     }
 
     /**
@@ -399,22 +431,36 @@ class EmailValidatorService
 
 
     /**
-     * Check if mailbox exists using SMTP RCPT TO verification.
-     * Returns ['exists' => true/false/null, 'reason' => string]
-     * null means verification was skipped or inconclusive.
+     * Check if mailbox exists using API or fast native DNS/MX fallback.
+     * Returns ['status' => 'valid'|'invalid'|'unknown', 'exists' => bool|null, 'reason' => string]
      */
     protected function checkMailboxExists(string $email, string $domain): array
     {
-        // Use the Python Verifier API instead of slow native SMTP checks
         $url = config('services.email_verifier.url');
         $key = config('services.email_verifier.key');
 
-        if (!$url) {
-            return ['exists' => null, 'reason' => 'Email verifier API not configured'];
+        // If no external API is configured, fall back to ultra-fast native PHP DNS/MX verification
+        if (empty($url)) {
+            $hasMx = $this->checkMxRecords($domain);
+            return [
+                'status' => $hasMx ? 'valid' : 'invalid',
+                'exists' => $hasMx,
+                'reason' => $hasMx ? 'Domain has valid MX mail servers' : 'Domain has no valid MX records',
+            ];
+        }
+
+        // Check if API was recently unreachable to avoid repeated connection timeouts
+        if (\Illuminate\Support\Facades\Cache::get('email_verifier_api_offline')) {
+            $hasMx = $this->checkMxRecords($domain);
+            return [
+                'status' => $hasMx ? 'valid' : 'invalid',
+                'exists' => $hasMx,
+                'reason' => ($hasMx ? 'Valid MX (API offline fallback)' : 'Invalid MX (API offline fallback)'),
+            ];
         }
 
         try {
-            $response = \Illuminate\Support\Facades\Http::timeout(8)->get($url, [
+            $response = \Illuminate\Support\Facades\Http::connectTimeout(2)->timeout(4)->get($url, [
                 'api_key' => $key,
                 'email' => $email,
             ]);
@@ -434,8 +480,17 @@ class EmailValidatorService
             }
 
             return ['status' => 'error', 'exists' => null, 'reason' => 'API returned error: ' . $response->status()];
-        } catch (\Exception $e) {
-            return ['status' => 'error', 'exists' => null, 'reason' => 'API connection failed: ' . $e->getMessage()];
+        } catch (\Throwable $e) {
+            // Mark API as offline for 2 minutes to prevent repeated delays on subsequent emails
+            \Illuminate\Support\Facades\Cache::put('email_verifier_api_offline', true, 120);
+
+            // Fall back to native DNS MX check immediately
+            $hasMx = $this->checkMxRecords($domain);
+            return [
+                'status' => $hasMx ? 'valid' : 'invalid',
+                'exists' => $hasMx,
+                'reason' => ($hasMx ? 'Domain has valid MX (fallback)' : 'No MX records found (fallback)'),
+            ];
         }
     }
 

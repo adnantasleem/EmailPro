@@ -32,7 +32,7 @@ return [
     ],
 
     'email_verifier' => [
-        'url' => env('EMAIL_VERIFIER_API_URL', 'http://127.0.0.1:5050/api/verify'),
+        'url' => env('EMAIL_VERIFIER_API_URL', null),
         'key' => env('EMAIL_VERIFIER_API_KEY'),
     ],
 

@@ -31,6 +31,9 @@ class InboxController extends Controller
         $smtps = SmtpConfig::where('user_id', Auth::id())
             ->where('is_active', true)
             ->where('bounce_check_enabled', true)
+            ->whereNotNull('imap_host')
+            ->where('imap_host', '!=', '')
+            ->orderByRaw('last_bounce_check_at IS NOT NULL, last_bounce_check_at ASC')
             ->get();
 
         if ($smtps->isEmpty()) {
@@ -40,10 +43,16 @@ class InboxController extends Controller
 
         $totalProcessed = 0;
         $errors = [];
+        $startTime = microtime(true);
 
         foreach ($smtps as $smtp) {
+            // Keep manual browser sync under 25 seconds so shared hosting never returns 504 Gateway Timeout
+            if ((microtime(true) - $startTime) >= 25) {
+                break;
+            }
+
             try {
-                $processed = $processor->processInbox($smtp);
+                $processed = $processor->processInbox($smtp, 25, true);
                 $totalProcessed += $processed;
             } catch (\Throwable $e) {
                 $errors[] = "SMTP {$smtp->name}: " . $e->getMessage();
@@ -53,7 +62,7 @@ class InboxController extends Controller
         if (!empty($errors)) {
             $errorMsg = implode('; ', $errors);
             return redirect()->route('inbox.index')
-                ->with('warning', "Inbox sync finished with warnings ({$totalProcessed} items processed). Errors: {$errorMsg}");
+                ->with('warning', "Inbox sync finished with warnings ({$totalProcessed} new items processed). Errors: {$errorMsg}");
         }
 
         return redirect()->route('inbox.index')

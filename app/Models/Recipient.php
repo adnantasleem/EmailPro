@@ -146,6 +146,9 @@ class Recipient extends Model
         if ($smtpConfigId) {
             $data['smtp_config_id'] = $smtpConfigId;
         }
+        if ($this->unsubscribe_token) {
+            $data['unsubscribe_token'] = $this->unsubscribe_token;
+        }
         $this->update($data);
     }
 
@@ -161,6 +164,9 @@ class Recipient extends Model
         if ($smtpConfigId) {
             $data['smtp_config_id'] = $smtpConfigId;
         }
+        if ($this->unsubscribe_token) {
+            $data['unsubscribe_token'] = $this->unsubscribe_token;
+        }
         $this->update($data);
     }
 
@@ -175,6 +181,9 @@ class Recipient extends Model
         ];
         if ($smtpConfigId) {
             $data['smtp_config_id'] = $smtpConfigId;
+        }
+        if ($this->unsubscribe_token) {
+            $data['unsubscribe_token'] = $this->unsubscribe_token;
         }
         $this->update($data);
     }

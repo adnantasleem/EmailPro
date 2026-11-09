@@ -692,7 +692,7 @@
         isError: false,
         openSmtp: false,
         searchSmtp: '',
-        selectedSmtp: '{{ $campaign->smtpConfigs->first()?->id ?? '' }}',
+        selectedSmtp: '{{ $campaign->smtpConfigs->first()?->id ?? $smtpConfigs->first()?->id ?? '' }}',
         smtps: [
             @foreach($smtpConfigs as $smtp)
             { id: '{{ $smtp->id }}', name: '{{ addslashes($smtp->name) }}' },

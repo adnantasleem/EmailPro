@@ -135,20 +135,34 @@ class Campaign extends Model
     }
 
     /**
-     * Get statistics for this campaign.
+     * Get statistics for this campaign in a single aggregated query.
      */
     public function getStatsAttribute(): array
     {
+        $bounceLike = "(error_message LIKE '%bounce%' OR error_message LIKE '%rejected%' OR error_message LIKE '%550%' OR error_message LIKE '%551%' OR error_message LIKE '%552%' OR error_message LIKE '%553%' OR error_message LIKE '%554%' OR error_message LIKE '%5.1.1%' OR error_message LIKE '%not found%' OR error_message LIKE '%does not exist%' OR error_message LIKE '%unavailable%' OR error_message LIKE '%undeliverable%' OR error_message LIKE '%unroutable%')";
+
+        $row = $this->recipients()
+            ->selectRaw('COUNT(*) as total')
+            ->selectRaw("SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending")
+            ->selectRaw("SUM(CASE WHEN status = 'validating' THEN 1 ELSE 0 END) as validating")
+            ->selectRaw("SUM(CASE WHEN status = 'valid' THEN 1 ELSE 0 END) as valid")
+            ->selectRaw("SUM(CASE WHEN status IN ('invalid', 'disposable') THEN 1 ELSE 0 END) as invalid")
+            ->selectRaw("SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent")
+            ->selectRaw("SUM(CASE WHEN status = 'replied' THEN 1 ELSE 0 END) as replied")
+            ->selectRaw("SUM(CASE WHEN status = 'failed' AND (error_message IS NULL OR NOT {$bounceLike}) THEN 1 ELSE 0 END) as failed")
+            ->selectRaw("SUM(CASE WHEN status = 'bounced' OR (status = 'failed' AND {$bounceLike}) THEN 1 ELSE 0 END) as bounced")
+            ->first();
+
         return [
-            'total' => $this->recipients()->count(),
-            'pending' => $this->recipients()->where('status', 'pending')->count(),
-            'validating' => $this->recipients()->where('status', 'validating')->count(),
-            'valid' => $this->recipients()->where('status', 'valid')->count(),
-            'invalid' => $this->recipients()->whereIn('status', ['invalid', 'disposable'])->count(),
-            'sent' => $this->recipients()->where('status', 'sent')->count(),
-            'replied' => $this->recipients()->where('status', 'replied')->count(),
-            'failed' => $this->recipients()->failedNonBounce()->count(),
-            'bounced' => $this->recipients()->bounced()->count(),
+            'total' => (int) ($row->total ?? 0),
+            'pending' => (int) ($row->pending ?? 0),
+            'validating' => (int) ($row->validating ?? 0),
+            'valid' => (int) ($row->valid ?? 0),
+            'invalid' => (int) ($row->invalid ?? 0),
+            'sent' => (int) ($row->sent ?? 0),
+            'replied' => (int) ($row->replied ?? 0),
+            'failed' => (int) ($row->failed ?? 0),
+            'bounced' => (int) ($row->bounced ?? 0),
         ];
     }
 

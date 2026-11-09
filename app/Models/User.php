@@ -77,17 +77,39 @@ class User extends Authenticatable
         return now()->greaterThan($this->expires_at);
     }
 
+    protected ?int $cachedSentDay = null;
+    protected ?int $cachedSentMonth = null;
+    protected ?int $cachedSentYear = null;
+
+    /**
+     * Increment in-memory sent counters when an email is sent during a job cycle.
+     */
+    public function incrementCachedSentCounts(int $by = 1): void
+    {
+        if ($this->cachedSentDay !== null) {
+            $this->cachedSentDay += $by;
+        }
+        if ($this->cachedSentMonth !== null) {
+            $this->cachedSentMonth += $by;
+        }
+        if ($this->cachedSentYear !== null) {
+            $this->cachedSentYear += $by;
+        }
+    }
+
     /**
      * Get count of emails sent today by this user.
      */
     public function getEmailsSentThisDayAttribute(): int
     {
-        return EmailLog::whereHas('campaign', function ($query) {
-            $query->where('user_id', $this->id);
-        })
-        ->where('status', EmailLog::STATUS_SENT)
-        ->where('sent_at', '>=', now()->startOfDay())
-        ->count();
+        if ($this->cachedSentDay !== null) {
+            return $this->cachedSentDay;
+        }
+
+        return $this->cachedSentDay = EmailLog::whereIn('campaign_id', Campaign::where('user_id', $this->id)->select('id'))
+            ->where('status', EmailLog::STATUS_SENT)
+            ->where('sent_at', '>=', now()->startOfDay())
+            ->count();
     }
 
     /**
@@ -95,12 +117,14 @@ class User extends Authenticatable
      */
     public function getEmailsSentThisMonthAttribute(): int
     {
-        return EmailLog::whereHas('campaign', function ($query) {
-            $query->where('user_id', $this->id);
-        })
-        ->where('status', EmailLog::STATUS_SENT)
-        ->where('sent_at', '>=', now()->startOfMonth())
-        ->count();
+        if ($this->cachedSentMonth !== null) {
+            return $this->cachedSentMonth;
+        }
+
+        return $this->cachedSentMonth = EmailLog::whereIn('campaign_id', Campaign::where('user_id', $this->id)->select('id'))
+            ->where('status', EmailLog::STATUS_SENT)
+            ->where('sent_at', '>=', now()->startOfMonth())
+            ->count();
     }
     
     /**
@@ -108,12 +132,14 @@ class User extends Authenticatable
      */
     public function getEmailsSentThisYearAttribute(): int
     {
-        return EmailLog::whereHas('campaign', function ($query) {
-            $query->where('user_id', $this->id);
-        })
-        ->where('status', EmailLog::STATUS_SENT)
-        ->where('sent_at', '>=', now()->startOfYear())
-        ->count();
+        if ($this->cachedSentYear !== null) {
+            return $this->cachedSentYear;
+        }
+
+        return $this->cachedSentYear = EmailLog::whereIn('campaign_id', Campaign::where('user_id', $this->id)->select('id'))
+            ->where('status', EmailLog::STATUS_SENT)
+            ->where('sent_at', '>=', now()->startOfYear())
+            ->count();
     }
 
     /**

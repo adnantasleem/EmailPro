@@ -53,14 +53,17 @@ class RecipientController extends Controller
         ];
 
         // Fetch SMTP configs used in this campaign for filtering
-        $campaignSmtps = \App\Models\SmtpConfig::where('user_id', auth()->id())
-            ->where(function ($q) use ($campaign) {
+        $campaignSmtpsQuery = \App\Models\SmtpConfig::where('user_id', auth()->id());
+
+        if (!$campaign->use_all_smtps) {
+            $campaignSmtpsQuery->where(function ($q) use ($campaign) {
                 $q->whereHas('campaigns', fn($c) => $c->where('campaigns.id', $campaign->id))
                   ->orWhereHas('emailLogs', fn($el) => $el->where('campaign_id', $campaign->id))
                   ->orWhereIn('id', $campaign->recipients()->whereNotNull('smtp_config_id')->select('smtp_config_id'));
-            })
-            ->orderBy('name')
-            ->get();
+            });
+        }
+
+        $campaignSmtps = $campaignSmtpsQuery->orderBy('name')->get();
 
         return view('recipients.index', compact('campaign', 'recipients', 'statusCounts', 'campaignSmtps'));
     }

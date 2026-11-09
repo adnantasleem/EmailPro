@@ -17,13 +17,15 @@ class ValidateEmailsJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     protected int $batchSize = 50;
+    protected int $maxExecutionTime = 12;
+    protected float $startTime;
 
     /**
      * Create a new job instance.
      */
-    public function __construct()
+    public function __construct(int $maxExecutionTime = 12)
     {
-        //
+        $this->maxExecutionTime = $maxExecutionTime;
     }
 
     /**
@@ -31,19 +33,23 @@ class ValidateEmailsJob implements ShouldQueue
      */
     public function handle(EmailValidatorService $validator): void
     {
+        $this->startTime = microtime(true);
+
         // Find campaigns in validating or sending status that have pending recipients
         $campaigns = Campaign::whereIn('status', [Campaign::STATUS_VALIDATING, Campaign::STATUS_SENDING])
             ->whereHas('recipients', function ($q) {
-                $q->where('status', Recipient::STATUS_PENDING);
+                $q->whereIn('status', [Recipient::STATUS_PENDING, Recipient::STATUS_VALIDATING]);
             })
             ->get();
 
         if ($campaigns->isEmpty()) {
-            Log::info('ValidateEmailsJob: No campaigns to validate');
             return;
         }
 
         foreach ($campaigns as $campaign) {
+            if ((microtime(true) - $this->startTime) >= $this->maxExecutionTime) {
+                break;
+            }
             $this->validateCampaignRecipients($campaign, $validator);
         }
     }
@@ -53,46 +59,48 @@ class ValidateEmailsJob implements ShouldQueue
      */
     protected function validateCampaignRecipients(Campaign $campaign, EmailValidatorService $validator): void
     {
-        Log::info("ValidateEmailsJob: Processing campaign {$campaign->id} - {$campaign->name}");
+        // Recover stuck validating recipients (> 5 minutes old)
+        $campaign->recipients()
+            ->where('status', Recipient::STATUS_VALIDATING)
+            ->where('updated_at', '<', now()->subMinutes(5))
+            ->update(['status' => Recipient::STATUS_PENDING]);
 
         // Get pending recipients
         $recipients = $campaign->recipients()
-            ->pendingValidation()
+            ->where('status', Recipient::STATUS_PENDING)
             ->limit($this->batchSize)
             ->get();
 
         if ($recipients->isEmpty()) {
-            // No more pending recipients, check if we should move to sending
-            $remainingPending = $campaign->recipients()->pendingValidation()->count();
-            
-            if ($remainingPending === 0) {
-                $validCount = $campaign->recipients()->status(Recipient::STATUS_VALID)->count();
-                
-                if ($validCount > 0) {
-                    if ($campaign->status === Campaign::STATUS_VALIDATING) {
-                        $campaign->update([
-                            'status' => Campaign::STATUS_SENDING,
-                            'started_at' => now(),
-                        ]);
-                        Log::info("ValidateEmailsJob: Campaign {$campaign->id} moved to sending status");
-                    }
-                } else {
-                    Log::warning("ValidateEmailsJob: Campaign {$campaign->id} has no valid recipients");
+            $remainingPending = $campaign->recipients()->pendingValidation()->exists();
+
+            if (!$remainingPending && $campaign->status === Campaign::STATUS_VALIDATING) {
+                $hasValid = $campaign->recipients()->status(Recipient::STATUS_VALID)->exists();
+                if ($hasValid) {
+                    $campaign->update([
+                        'status' => Campaign::STATUS_SENDING,
+                        'started_at' => now(),
+                    ]);
+                    Log::info("ValidateEmailsJob: Campaign {$campaign->id} moved to sending status");
                 }
             }
             return;
         }
 
-        // Mark recipients as validating
-        $recipientIds = $recipients->pluck('id')->toArray();
-        Recipient::whereIn('id', $recipientIds)->update(['status' => Recipient::STATUS_VALIDATING]);
+        // Pre-attach campaign relation so markAsInvalid/markAsDisposable doesn't lazy-load it
+        foreach ($recipients as $recipient) {
+            $recipient->setRelation('campaign', $campaign);
+        }
 
-        // Validate each recipient
         $validated = 0;
         $valid = 0;
         $invalid = 0;
 
         foreach ($recipients as $recipient) {
+            if ((microtime(true) - $this->startTime) >= $this->maxExecutionTime) {
+                break;
+            }
+
             $result = $validator->validate($recipient);
             $validated++;
 
@@ -103,6 +111,8 @@ class ValidateEmailsJob implements ShouldQueue
             }
         }
 
-        Log::info("ValidateEmailsJob: Campaign {$campaign->id} - Validated: {$validated}, Valid: {$valid}, Invalid: {$invalid}");
+        if ($validated > 0) {
+            Log::info("ValidateEmailsJob: Campaign {$campaign->id} - Validated: {$validated}, Valid: {$valid}, Invalid: {$invalid}");
+        }
     }
 }

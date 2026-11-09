@@ -17,11 +17,23 @@ class ContactList extends Model
         'name',
         'description',
         'contacts_count',
+        'has_pending_contacts',
     ];
 
     protected $casts = [
         'contacts_count' => 'integer',
+        'has_pending_contacts' => 'boolean',
     ];
+
+    /**
+     * Refresh the has_pending_contacts flag based on remaining pending contacts.
+     */
+    public function syncPendingStatus(): bool
+    {
+        $hasPending = $this->contacts()->where('validation_status', Contact::STATUS_PENDING)->exists();
+        $this->update(['has_pending_contacts' => $hasPending]);
+        return $hasPending;
+    }
 
     /**
      * Get the user that owns this list.
@@ -293,6 +305,7 @@ class ContactList extends Model
         }
 
         $this->updateContactsCount();
+        $this->update(['has_pending_contacts' => true]);
         return $imported;
     }
 }

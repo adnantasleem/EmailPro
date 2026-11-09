@@ -15,12 +15,14 @@ class ProcessImapInboxJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    protected int $maxExecutionTime;
+
     /**
      * Create a new job instance.
      */
-    public function __construct()
+    public function __construct(int $maxExecutionTime = 20)
     {
-        //
+        $this->maxExecutionTime = $maxExecutionTime;
     }
 
     /**
@@ -28,16 +30,14 @@ class ProcessImapInboxJob implements ShouldQueue
      */
     public function handle(ImapProcessorService $processor): void
     {
-        // To prevent this job from taking too long and overlapping with the next minute's run,
-        // we'll stop processing after 45 seconds.
         $startTime = microtime(true);
-        $maxExecutionTime = 45; // seconds
 
-        // Get all active SMTPs that have bounce checking enabled
+        // Get all active SMTPs that have bounce checking enabled, prioritizing unchecked/oldest-checked first
         $smtps = SmtpConfig::where('is_active', true)
             ->where('bounce_check_enabled', true)
-            // Prioritize ones that haven't been checked in a while
-            ->orderBy('last_bounce_check_at', 'asc')
+            ->whereNotNull('imap_host')
+            ->where('imap_host', '!=', '')
+            ->orderByRaw('last_bounce_check_at IS NOT NULL, last_bounce_check_at ASC')
             ->get();
 
         if ($smtps->isEmpty()) {
@@ -47,14 +47,12 @@ class ProcessImapInboxJob implements ShouldQueue
         $totalProcessed = 0;
 
         foreach ($smtps as $smtp) {
-            // Check if we're out of time
-            if (microtime(true) - $startTime > $maxExecutionTime) {
-                Log::warning("ProcessImapInboxJob: Reached 45s time limit. Stopping early.");
+            if ((microtime(true) - $startTime) >= $this->maxExecutionTime) {
                 break;
             }
 
             try {
-                $processed = $processor->processInbox($smtp);
+                $processed = $processor->processInbox($smtp, 25);
                 $totalProcessed += $processed;
             } catch (\Exception $e) {
                 Log::error("ProcessImapInboxJob: Error processing SMTP {$smtp->id}: " . $e->getMessage());

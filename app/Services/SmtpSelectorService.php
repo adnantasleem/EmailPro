@@ -8,23 +8,48 @@ use Illuminate\Support\Collection;
 class SmtpSelectorService
 {
     /**
+     * In-memory cache of active SMTP models keyed by user_id (or 'all') during a job cycle.
+     */
+    protected array $userSmtpCache = [];
+
+    /**
+     * Clear the in-memory SMTP cache.
+     */
+    public function clearCache(): void
+    {
+        $this->userSmtpCache = [];
+    }
+
+    /**
+     * Get cached active SMTPs for a user (or all users if null).
+     */
+    protected function getActiveSmtps(?int $userId = null): Collection
+    {
+        $key = $userId ?? 'all';
+        if (!isset($this->userSmtpCache[$key])) {
+            $query = SmtpConfig::active();
+            if ($userId) {
+                $query->where('user_id', $userId);
+            }
+            $this->userSmtpCache[$key] = $query->get();
+        }
+
+        // Filter out any that were auto-paused in memory during this run
+        return $this->userSmtpCache[$key]->filter(fn(SmtpConfig $s) => $s->is_active && !$s->auto_paused);
+    }
+
+    /**
      * Select a random active SMTP account that can still send.
      * If userId is provided, only select from that user's SMTPs.
      */
     public function selectSmtp(?int $userId = null): ?SmtpConfig
     {
-        // Get all active SMTPs (optionally filtered by user)
-        $query = SmtpConfig::active();
-        if ($userId) {
-            $query->where('user_id', $userId);
-        }
-        $smtps = $query->get();
+        $smtps = $this->getActiveSmtps($userId);
 
         if ($smtps->isEmpty()) {
             return null;
         }
 
-        // Reset counters if needed and filter those under limit
         $availableSmtps = $smtps->filter(function (SmtpConfig $smtp) {
             return $smtp->canSend();
         });
@@ -33,8 +58,34 @@ class SmtpSelectorService
             return null;
         }
 
-        // Return a random one from available
         return $availableSmtps->random();
+    }
+
+    /**
+     * Get all active SMTPs allowed for the given Campaign (using eager-loaded relation when available).
+     */
+    public function getEligibleSmtpsForCampaign(\App\Models\Campaign $campaign): Collection
+    {
+        $smtps = $this->getActiveSmtps($campaign->user_id);
+
+        if ($smtps->isEmpty()) {
+            return collect();
+        }
+
+        if (!$campaign->use_all_smtps) {
+            $allowedIds = $campaign->relationLoaded('smtpConfigs')
+                ? $campaign->smtpConfigs->pluck('id')->all()
+                : $campaign->smtpConfigs()->pluck('smtp_configs.id')->all();
+
+            if (empty($allowedIds)) {
+                return collect();
+            }
+
+            $allowedMap = array_flip($allowedIds);
+            $smtps = $smtps->filter(fn(SmtpConfig $s) => isset($allowedMap[$s->id]));
+        }
+
+        return $smtps;
     }
 
     /**
@@ -43,17 +94,7 @@ class SmtpSelectorService
      */
     public function selectSmtpForCampaign(\App\Models\Campaign $campaign): ?SmtpConfig
     {
-        $query = SmtpConfig::active()->where('user_id', $campaign->user_id);
-
-        if (!$campaign->use_all_smtps) {
-            $allowedIds = $campaign->smtpConfigs()->pluck('smtp_configs.id')->toArray();
-            if (empty($allowedIds)) {
-                return null;
-            }
-            $query->whereIn('id', $allowedIds);
-        }
-
-        $smtps = $query->get();
+        $smtps = $this->getEligibleSmtpsForCampaign($campaign);
 
         if ($smtps->isEmpty()) {
             return null;
@@ -68,6 +109,33 @@ class SmtpSelectorService
         }
 
         return $availableSmtps->random();
+    }
+
+    /**
+     * Return minimum seconds until next SMTP is ready for this campaign:
+     * - 0 if at least one SMTP can send immediately
+     * - > 0 if SMTP(s) have quota left this hour/day but are waiting on intra-hour cooldown
+     * - null if all allowed SMTPs are exhausted or outside active hours
+     */
+    public function getSecondsUntilNextSendForCampaign(\App\Models\Campaign $campaign): ?int
+    {
+        $smtps = $this->getEligibleSmtpsForCampaign($campaign);
+        if ($smtps->isEmpty()) {
+            return null;
+        }
+
+        $minWait = null;
+        foreach ($smtps as $smtp) {
+            $wait = $smtp->getSecondsUntilNextSend();
+            if ($wait === 0) {
+                return 0;
+            }
+            if ($wait !== null && ($minWait === null || $wait < $minWait)) {
+                $minWait = $wait;
+            }
+        }
+
+        return $minWait;
     }
 
     /**
@@ -115,18 +183,14 @@ class SmtpSelectorService
 
     /**
      * Reset all SMTP daily counters (usually called at midnight).
-     * Also auto-resumes campaigns that were paused due to quota exhaustion.
+     * Properly progresses warmup days, rolls randomized daily limits, and auto-resumes quota-paused campaigns.
      */
     public function resetAllCounters(): void
     {
-        SmtpConfig::query()->update([
-            'sent_today' => 0,
-            'last_reset_date' => today(),
-        ]);
+        foreach (SmtpConfig::all() as $smtp) {
+            $smtp->resetDailyCounterIfNeeded();
+        }
 
-        // Auto-resume all campaigns paused due to quota exhaustion
-        // Now that quotas are reset, these campaigns can send again
-        // Manually paused campaigns are NOT affected
         $resumed = \App\Models\Campaign::where('status', \App\Models\Campaign::STATUS_PAUSED)
             ->where('pause_reason', \App\Models\Campaign::PAUSE_REASON_QUOTA)
             ->update([
