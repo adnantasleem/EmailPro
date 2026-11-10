@@ -37,33 +37,10 @@ class ImapProcessorService
         $emailsProcessed = 0;
         
         try {
-            $folderName = $smtp->imap_folder ?: 'INBOX';
-            $folder = $client->getFolder($folderName);
-            
-            if (!$folder) {
-                $availableFolders = [];
-                try {
-                    $folders = $client->getFolders(false);
-                    foreach ($folders as $f) {
-                        $availableFolders[] = $f->path;
-                        if (strtolower($f->name) === strtolower($folderName) || strtolower($f->path) === strtolower($folderName)) {
-                            $folder = $f;
-                        }
-                    }
-                } catch (\Exception $e) {
-                    $availableFolders[] = 'Error fetching folders';
-                }
-                
-                if (!$folder) {
-                    $foldersStr = !empty($availableFolders) ? implode(', ', $availableFolders) : 'None';
-                    $errMsg = "Folder '{$folderName}' not found for SMTP {$smtp->id}. Available folders: {$foldersStr}";
-                    Log::error("ImapProcessorService: {$errMsg}");
-                    $client->disconnect();
-                    if ($throwOnError) {
-                        throw new \RuntimeException($errMsg);
-                    }
-                    return 0;
-                }
+            $foldersToScan = $this->resolveFoldersToScan($client, $smtp, $throwOnError);
+            if (empty($foldersToScan)) {
+                $client->disconnect();
+                return 0;
             }
             
             // Load processed message UIDs for this SMTP so we can safely inspect recent messages (even if already marked Seen in webmail/phone)
@@ -72,133 +49,143 @@ class ImapProcessorService
             $processedUidsMap = array_flip($processedUids);
             $uidsModified = false;
 
-            // Search recent emails from last 3 days (both Seen & Unseen so webmail-opened replies/bounces are never missed)
-            try {
-                $query = $folder->query()->since(now()->subDays(3));
-                if (method_exists($query, 'setFetchAttachment')) {
-                    $query->setFetchAttachment(false);
-                }
-                if (method_exists($query, 'limit')) {
-                    $query->limit($maxMessages);
-                }
-                $messages = $query->get();
-            } catch (\Throwable $queryErr) {
-                // Fallback to unseen() if the IMAP server rejects the since() query
-                $query = $folder->query()->unseen();
-                if (method_exists($query, 'setFetchAttachment')) {
-                    $query->setFetchAttachment(false);
-                }
-                if (method_exists($query, 'limit')) {
-                    $query->limit($maxMessages);
-                }
-                $messages = $query->get();
-            }
-            
             $smtpOwnEmails = array_filter([
                 strtolower(trim($smtp->from_email ?? '')),
                 strtolower(trim($smtp->username ?? '')),
             ]);
 
-            foreach ($messages as $message) {
+            foreach ($foldersToScan as $folder) {
+                $folderKey = strtolower($folder->path ?? $folder->name ?? 'inbox');
+
+                // Search recent emails from last 3 days (both Seen & Unseen so webmail-opened or spam-filtered replies/bounces are never missed)
                 try {
-                    $uid = method_exists($message, 'getUid') ? (string) $message->getUid() : null;
-                    if ($uid && isset($processedUidsMap[$uid])) {
+                    $query = $folder->query()->since(now()->subDays(3));
+                    if (method_exists($query, 'setFetchAttachment')) {
+                        $query->setFetchAttachment(false);
+                    }
+                    if (method_exists($query, 'limit')) {
+                        $query->limit($maxMessages);
+                    }
+                    $messages = $query->get();
+                } catch (\Throwable $queryErr) {
+                    try {
+                        $query = $folder->query()->unseen();
+                        if (method_exists($query, 'setFetchAttachment')) {
+                            $query->setFetchAttachment(false);
+                        }
+                        if (method_exists($query, 'limit')) {
+                            $query->limit($maxMessages);
+                        }
+                        $messages = $query->get();
+                    } catch (\Throwable $fallbackErr) {
                         continue;
                     }
+                }
 
-                    $headerRaw = $message->getHeader()->raw ?? '';
-                    $htmlBody = $message->hasHTMLBody() ? $message->getHTMLBody() : null;
-                    $textBody = $message->hasTextBody() ? $message->getTextBody() : ($htmlBody ? trim(strip_tags($htmlBody)) : '');
-                    $combinedBody = ($htmlBody ?: '') . "\n" . ($textBody ?: '');
-                    
-                    // Safely extract From address
-                    $fromObj = null;
+                foreach ($messages as $message) {
                     try {
-                        $fromCollection = $message->getFrom();
-                        if ($fromCollection && method_exists($fromCollection, 'first')) {
-                            $fromObj = $fromCollection->first();
-                        } elseif (is_array($fromCollection) && !empty($fromCollection)) {
-                            $fromObj = $fromCollection[0];
+                        $rawUid = method_exists($message, 'getUid') ? (string) $message->getUid() : null;
+                        $scopedUid = $rawUid ? "{$folderKey}:{$rawUid}" : null;
+
+                        // Check both folder-scoped UID and legacy unscoped UID
+                        if ($scopedUid && (isset($processedUidsMap[$scopedUid]) || ($folderKey === 'inbox' && isset($processedUidsMap[$rawUid])))) {
+                            continue;
                         }
-                    } catch (\Throwable $e) {
-                        // Ignore extraction exception
-                    }
 
-                    $fromMailbox = $fromObj ? ($fromObj->mailbox ?? '') : '';
-                    $fromFullEmail = '';
-
-                    if ($fromObj) {
-                        if (!empty($fromObj->mail)) {
-                            $fromFullEmail = $fromObj->mail;
-                        } elseif (!empty($fromObj->mailbox) && !empty($fromObj->host)) {
-                            $fromFullEmail = $fromObj->mailbox . '@' . $fromObj->host;
-                        }
-                    }
-
-                    // Fallback to Reply-To if From was empty
-                    if (empty($fromFullEmail)) {
+                        $headerRaw = $message->getHeader()->raw ?? '';
+                        $htmlBody = $message->hasHTMLBody() ? $message->getHTMLBody() : null;
+                        $textBody = $message->hasTextBody() ? $message->getTextBody() : ($htmlBody ? trim(strip_tags($htmlBody)) : '');
+                        $combinedBody = ($htmlBody ?: '') . "\n" . ($textBody ?: '');
+                        
+                        // Safely extract From address
+                        $fromObj = null;
                         try {
-                            $replyToCollection = $message->getReplyTo();
-                            $replyToObj = ($replyToCollection && method_exists($replyToCollection, 'first')) 
-                                ? $replyToCollection->first() 
-                                : (is_array($replyToCollection) && !empty($replyToCollection) ? $replyToCollection[0] : null);
-
-                            if ($replyToObj) {
-                                if (!empty($replyToObj->mail)) {
-                                    $fromFullEmail = $replyToObj->mail;
-                                } elseif (!empty($replyToObj->mailbox) && !empty($replyToObj->host)) {
-                                    $fromFullEmail = $replyToObj->mailbox . '@' . $replyToObj->host;
-                                }
+                            $fromCollection = $message->getFrom();
+                            if ($fromCollection && method_exists($fromCollection, 'first')) {
+                                $fromObj = $fromCollection->first();
+                            } elseif (is_array($fromCollection) && !empty($fromCollection)) {
+                                $fromObj = $fromCollection[0];
                             }
                         } catch (\Throwable $e) {
-                            // Ignore fallback exception
+                            // Ignore extraction exception
                         }
-                    }
 
-                    $fromFullEmail = trim(strtolower($fromFullEmail), "<>\"' \t\n\r\0\x0B");
+                        $fromMailbox = $fromObj ? ($fromObj->mailbox ?? '') : '';
+                        $fromFullEmail = '';
 
-                    $headerInfo = new \stdClass();
-                    $headerInfo->from = [
-                        (object) ['mailbox' => $fromMailbox]
-                    ];
-                    $headerInfo->subject = (string) $message->getSubject();
-                    
-                    if ($this->isBounceEmail($headerInfo, $headerRaw, $combinedBody)) {
-                        $bouncedEmail = $this->extractBouncedAddress($headerRaw, $combinedBody, $smtp);
-                        
-                        if ($bouncedEmail) {
-                            $this->handleBouncedAddress($smtp, $bouncedEmail);
-                            $emailsProcessed++;
-                        }
-                    } else {
-                        // Ignore self-test emails sent from the SMTP account itself
-                        if (!in_array($fromFullEmail, $smtpOwnEmails, true) && filter_var($fromFullEmail, FILTER_VALIDATE_EMAIL)) {
-                            $wasReply = $this->handleReplyAddress($smtp, $fromFullEmail, $headerInfo->subject, $textBody, $htmlBody);
-                            if ($wasReply) {
-                                $emailsProcessed++;
+                        if ($fromObj) {
+                            if (!empty($fromObj->mail)) {
+                                $fromFullEmail = $fromObj->mail;
+                            } elseif (!empty($fromObj->mailbox) && !empty($fromObj->host)) {
+                                $fromFullEmail = $fromObj->mailbox . '@' . $fromObj->host;
                             }
                         }
+
+                        // Fallback to Reply-To if From was empty
+                        if (empty($fromFullEmail)) {
+                            try {
+                                $replyToCollection = $message->getReplyTo();
+                                $replyToObj = ($replyToCollection && method_exists($replyToCollection, 'first')) 
+                                    ? $replyToCollection->first() 
+                                    : (is_array($replyToCollection) && !empty($replyToCollection) ? $replyToCollection[0] : null);
+
+                                if ($replyToObj) {
+                                    if (!empty($replyToObj->mail)) {
+                                        $fromFullEmail = $replyToObj->mail;
+                                    } elseif (!empty($replyToObj->mailbox) && !empty($replyToObj->host)) {
+                                        $fromFullEmail = $replyToObj->mailbox . '@' . $replyToObj->host;
+                                    }
+                                }
+                            } catch (\Throwable $e) {
+                                // Ignore fallback exception
+                            }
+                        }
+
+                        $fromFullEmail = trim(strtolower($fromFullEmail), "<>\"' \t\n\r\0\x0B");
+
+                        $headerInfo = new \stdClass();
+                        $headerInfo->from = [
+                            (object) ['mailbox' => $fromMailbox]
+                        ];
+                        $headerInfo->subject = (string) $message->getSubject();
+                        
+                        if ($this->isBounceEmail($headerInfo, $headerRaw, $combinedBody)) {
+                            $bouncedEmail = $this->extractBouncedAddress($headerRaw, $combinedBody, $smtp);
+                            
+                            if ($bouncedEmail) {
+                                $this->handleBouncedAddress($smtp, $bouncedEmail);
+                                $emailsProcessed++;
+                            }
+                        } else {
+                            // Ignore self-test emails sent from the SMTP account itself
+                            if (!in_array($fromFullEmail, $smtpOwnEmails, true) && filter_var($fromFullEmail, FILTER_VALIDATE_EMAIL)) {
+                                $wasReply = $this->handleReplyAddress($smtp, $fromFullEmail, $headerInfo->subject, $textBody, $htmlBody);
+                                if ($wasReply) {
+                                    $emailsProcessed++;
+                                }
+                            }
+                        }
+                        
+                        // Mark as seen and record folder-scoped UID in cache so we never re-process this message
+                        if ($scopedUid) {
+                            $processedUidsMap[$scopedUid] = true;
+                            $uidsModified = true;
+                        }
+                        try {
+                            $message->setFlag('Seen');
+                        } catch (\Throwable $e) {
+                            // Non-fatal if folder is read-only; UID cache prevents re-processing
+                        }
+                        
+                    } catch (\Exception $e) {
+                        Log::error("ImapProcessorService: Error processing email for SMTP {$smtp->id} in folder {$folderKey}: " . $e->getMessage());
                     }
-                    
-                    // Mark as seen and record UID in cache so we never re-process this message
-                    if ($uid) {
-                        $processedUidsMap[$uid] = true;
-                        $uidsModified = true;
-                    }
-                    try {
-                        $message->setFlag('Seen');
-                    } catch (\Throwable $e) {
-                        // Non-fatal if folder is read-only; UID cache prevents re-processing
-                    }
-                    
-                } catch (\Exception $e) {
-                    Log::error("ImapProcessorService: Error processing email for SMTP {$smtp->id}: " . $e->getMessage());
                 }
             }
 
             if ($uidsModified) {
-                // Keep most recent 500 UIDs per SMTP for 7 days
-                $updatedUids = array_slice(array_keys($processedUidsMap), -500);
+                // Keep most recent 600 UIDs per SMTP for 7 days
+                $updatedUids = array_slice(array_keys($processedUidsMap), -600);
                 \Illuminate\Support\Facades\Cache::put($processedUidsKey, $updatedUids, 86400 * 7);
             }
             
@@ -215,6 +202,103 @@ class ImapProcessorService
         }
         
         return $emailsProcessed;
+    }
+
+    /**
+     * Resolve both the primary Inbox folder(s) AND any Spam/Junk folders on the IMAP server
+     * so replies and bounces landing in Spam/Junk are automatically captured too.
+     */
+    protected function resolveFoldersToScan($client, SmtpConfig $smtp, bool $throwOnError = false): array
+    {
+        $configuredRaw = $smtp->imap_folder ?: 'INBOX';
+        $requestedNames = array_filter(array_map(fn($f) => strtolower(trim($f)), explode(',', $configuredRaw)));
+        if (empty($requestedNames)) {
+            $requestedNames = ['inbox'];
+        }
+
+        // Standard Spam/Junk folder names across cPanel/Dovecot, Gmail, Outlook/M365, Zoho, Hostinger, Yahoo
+        $spamFolderNames = [
+            'spam',
+            'junk',
+            'junk e-mail',
+            'junk email',
+            'bulk',
+            'bulk mail',
+            'inbox.spam',
+            'inbox.junk',
+            '[gmail]/spam',
+            '[google mail]/spam',
+        ];
+
+        $matchedFolders = [];
+        $availablePaths = [];
+
+        try {
+            // Fetch folder tree (hierarchical = true so [Gmail]/Spam and INBOX.spam children are included)
+            $allFolders = $client->getFolders(true);
+            $flatFolders = [];
+
+            $flatten = function ($folders) use (&$flatten, &$flatFolders) {
+                foreach ($folders as $f) {
+                    $flatFolders[] = $f;
+                    if (!empty($f->children) && is_iterable($f->children)) {
+                        $flatten($f->children);
+                    }
+                }
+            };
+            $flatten($allFolders);
+
+            foreach ($flatFolders as $f) {
+                $nameLower = strtolower($f->name ?? '');
+                $pathLower = strtolower($f->path ?? '');
+                $availablePaths[] = $f->path ?? $f->name;
+
+                $isRequested = in_array($nameLower, $requestedNames, true) || in_array($pathLower, $requestedNames, true);
+                $isSpamOrJunk = in_array($nameLower, $spamFolderNames, true)
+                    || in_array($pathLower, $spamFolderNames, true)
+                    || str_ends_with($pathLower, '.spam')
+                    || str_ends_with($pathLower, '.junk')
+                    || str_ends_with($pathLower, '/spam')
+                    || str_ends_with($pathLower, '/junk');
+
+                if ($isRequested || $isSpamOrJunk) {
+                    $matchedFolders[$pathLower ?: $nameLower] = $f;
+                }
+            }
+        } catch (\Throwable $e) {
+            // Fallback to direct getFolder() if listing all folders is not supported
+        }
+
+        // Fallback if folder tree listing didn't return the primary folder
+        if (empty($matchedFolders)) {
+            $primary = $client->getFolder($smtp->imap_folder ?: 'INBOX');
+            if ($primary) {
+                $matchedFolders[strtolower($primary->path ?? 'inbox')] = $primary;
+            }
+            // Also try direct lookup of common Spam/Junk folder names
+            foreach (['Spam', 'Junk', 'INBOX.spam', 'INBOX.Junk', '[Gmail]/Spam'] as $spamName) {
+                try {
+                    $sf = $client->getFolder($spamName);
+                    if ($sf) {
+                        $matchedFolders[strtolower($sf->path ?? $spamName)] = $sf;
+                        break;
+                    }
+                } catch (\Throwable $e) {
+                    // Ignore missing spam folder
+                }
+            }
+        }
+
+        if (empty($matchedFolders)) {
+            $foldersStr = !empty($availablePaths) ? implode(', ', $availablePaths) : 'None';
+            $errMsg = "Folder '{$configuredRaw}' not found for SMTP {$smtp->id}. Available folders: {$foldersStr}";
+            Log::error("ImapProcessorService: {$errMsg}");
+            if ($throwOnError) {
+                throw new \RuntimeException($errMsg);
+            }
+        }
+
+        return array_values($matchedFolders);
     }
 
     /**
