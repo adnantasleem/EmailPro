@@ -18,7 +18,7 @@ class ImapProcessorService
      * @param int $maxMessages Maximum messages to process per check to prevent memory/timeout exhaustion
      * @param bool $throwOnError Whether to rethrow connection/folder errors (e.g. for manual UI sync feedback)
      */
-    public function processInbox(SmtpConfig $smtp, int $maxMessages = 25, bool $throwOnError = false): int
+    public function processInbox(SmtpConfig $smtp, int $maxMessages = 50, bool $throwOnError = false): int
     {
         // Always update last_bounce_check_at first so a failing/unreachable IMAP server rotates to the back of the queue
         $smtp->update(['last_bounce_check_at' => now()]);
@@ -57,11 +57,14 @@ class ImapProcessorService
             foreach ($foldersToScan as $folder) {
                 $folderKey = strtolower($folder->path ?? $folder->name ?? 'inbox');
 
-                // Search recent emails from last 3 days (both Seen & Unseen so webmail-opened or spam-filtered replies/bounces are never missed)
+                // Search recent emails from last 3 days (newest first, both Seen & Unseen so webmail-opened or spam-filtered replies/bounces are never missed)
                 try {
                     $query = $folder->query()->since(now()->subDays(3));
                     if (method_exists($query, 'setFetchAttachment')) {
                         $query->setFetchAttachment(false);
+                    }
+                    if (method_exists($query, 'setFetchOrder')) {
+                        $query->setFetchOrder('desc');
                     }
                     if (method_exists($query, 'limit')) {
                         $query->limit($maxMessages);
@@ -72,6 +75,9 @@ class ImapProcessorService
                         $query = $folder->query()->unseen();
                         if (method_exists($query, 'setFetchAttachment')) {
                             $query->setFetchAttachment(false);
+                        }
+                        if (method_exists($query, 'setFetchOrder')) {
+                            $query->setFetchOrder('desc');
                         }
                         if (method_exists($query, 'limit')) {
                             $query->limit($maxMessages);

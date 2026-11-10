@@ -52,7 +52,7 @@ class InboxController extends Controller
             }
 
             try {
-                $processed = $processor->processInbox($smtp, 25, true);
+                $processed = $processor->processInbox($smtp, 50, true);
                 $totalProcessed += $processed;
             } catch (\Throwable $e) {
                 $errors[] = "SMTP {$smtp->name}: " . $e->getMessage();

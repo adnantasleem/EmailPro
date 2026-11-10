@@ -52,7 +52,7 @@ class ProcessImapInboxJob implements ShouldQueue
             }
 
             try {
-                $processed = $processor->processInbox($smtp, 25);
+                $processed = $processor->processInbox($smtp, 50);
                 $totalProcessed += $processed;
             } catch (\Exception $e) {
                 Log::error("ProcessImapInboxJob: Error processing SMTP {$smtp->id}: " . $e->getMessage());
