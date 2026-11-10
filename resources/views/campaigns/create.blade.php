@@ -251,8 +251,8 @@
                             <x-input-error :messages="$errors->get('smtp_configs')" class="mt-2" />
 
                             <!-- Hidden Inputs -->
-                            <template x-for="smtp in smtps.filter(s => s.checked)" :key="smtp.id">
-                                <input type="hidden" name="smtp_configs[]" :value="smtp.id">
+                            <template x-for="id in selectedIds" :key="id">
+                                <input type="hidden" name="smtp_configs[]" :value="id">
                             </template>
 
                             <!-- Modal -->
@@ -291,7 +291,7 @@
                                             <div class="max-h-60 overflow-y-auto border border-gray-200 rounded-md custom-scrollbar pr-1">
                                                 <template x-for="smtp in filteredSmtps" :key="smtp.id">
                                                     <label class="flex items-center px-4 py-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer last:border-b-0">
-                                                        <input type="checkbox" x-model="smtp.checked" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                                                        <input type="checkbox" :value="String(smtp.id)" x-model="selectedIds" class="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
                                                         <div class="ml-3">
                                                             <span class="block text-sm font-medium text-gray-700" x-text="smtp.name"></span>
                                                             <span class="block text-xs text-gray-500" x-text="smtp.username"></span>
@@ -507,35 +507,38 @@
             });
         });
 
-        document.addEventListener('alpine:init', () => {
-            Alpine.data('smtpSelector', (allSmtps, selectedIds, initUseAllSmtps) => ({
-                isOpen: false,
-                useAllSmtps: initUseAllSmtps,
-                search: '',
-                smtps: allSmtps.map(s => ({
-                    ...s,
-                    checked: selectedIds.includes(s.id.toString()) || selectedIds.includes(s.id)
-                })),
-                get filteredSmtps() {
-                    if (this.search === '') return this.smtps;
-                    const q = this.search.toLowerCase();
-                    return this.smtps.filter(s => 
-                        (s.name && s.name.toLowerCase().includes(q)) || 
-                        (s.username && s.username.toLowerCase().includes(q))
-                    );
-                },
-                get allFilteredChecked() {
-                    if (this.filteredSmtps.length === 0) return false;
-                    return this.filteredSmtps.every(s => s.checked);
-                },
-                get selectedSmtpsCount() {
-                    return this.smtps.filter(s => s.checked).length;
-                },
-                toggleAll() {
-                    const check = !this.allFilteredChecked;
-                    this.filteredSmtps.forEach(s => s.checked = check);
+        window.smtpSelector = (allSmtps, selectedIds, initUseAllSmtps) => ({
+            isOpen: false,
+            useAllSmtps: initUseAllSmtps,
+            search: '',
+            smtps: allSmtps,
+            selectedIds: (selectedIds || []).map(id => String(id)),
+            get filteredSmtps() {
+                if (this.search === '') return this.smtps;
+                const q = this.search.toLowerCase();
+                return this.smtps.filter(s => 
+                    (s.name && s.name.toLowerCase().includes(q)) || 
+                    (s.username && s.username.toLowerCase().includes(q))
+                );
+            },
+            get allFilteredChecked() {
+                if (this.filteredSmtps.length === 0) return false;
+                return this.filteredSmtps.every(s => this.selectedIds.includes(String(s.id)));
+            },
+            get selectedSmtpsCount() {
+                return this.selectedIds.length;
+            },
+            toggleAll() {
+                const filteredIds = this.filteredSmtps.map(s => String(s.id));
+                if (this.allFilteredChecked) {
+                    this.selectedIds = this.selectedIds.filter(id => !filteredIds.includes(id));
+                } else {
+                    this.selectedIds = Array.from(new Set([...this.selectedIds, ...filteredIds]));
                 }
-            }));
+            }
+        });
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('smtpSelector', window.smtpSelector);
         });
     </script>
     <style>

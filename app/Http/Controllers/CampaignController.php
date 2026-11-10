@@ -143,11 +143,16 @@ class CampaignController extends Controller
             $errors['bodies'] = 'Please add or select at least one body template.';
         }
 
+        $useAllSmtps = $request->has('use_all_smtps');
+        $selectedSmtpIds = array_values(array_unique(array_filter($validated['smtp_configs'] ?? [])));
+
+        if (!$useAllSmtps && empty($selectedSmtpIds)) {
+            $errors['smtp_configs'] = 'Please select at least one SMTP account, or enable "Use all my active SMTP accounts".';
+        }
+
         if (!empty($errors)) {
             return redirect()->back()->withInput()->withErrors($errors);
         }
-
-        $useAllSmtps = $request->has('use_all_smtps');
 
         // Create campaign
         $campaign = Campaign::create([
@@ -160,8 +165,8 @@ class CampaignController extends Controller
             'scheduled_at' => $validated['scheduled_at'] ?? null,
         ]);
 
-        if (!$useAllSmtps && !empty($validated['smtp_configs'])) {
-            $campaign->smtpConfigs()->attach($validated['smtp_configs']);
+        if (!$useAllSmtps && !empty($selectedSmtpIds)) {
+            $campaign->smtpConfigs()->sync($selectedSmtpIds);
         }
 
         // Add saved subject lines (from groups + individual, deduplicated)
@@ -520,6 +525,13 @@ class CampaignController extends Controller
         ]);
 
         $useAllSmtps = $request->has('use_all_smtps');
+        $selectedSmtpIds = array_values(array_unique(array_filter($validated['smtp_configs'] ?? [])));
+
+        if (!$useAllSmtps && empty($selectedSmtpIds)) {
+            return redirect()->back()->withInput()->withErrors([
+                'smtp_configs' => 'Please select at least one SMTP account, or enable "Use all my active SMTP accounts".',
+            ]);
+        }
 
         // Update campaign basic info
         $campaign->update([
@@ -530,8 +542,8 @@ class CampaignController extends Controller
             'scheduled_at' => $validated['scheduled_at'] ?? null,
         ]);
         
-        if (!$useAllSmtps && !empty($validated['smtp_configs'])) {
-            $campaign->smtpConfigs()->sync($validated['smtp_configs']);
+        if (!$useAllSmtps && !empty($selectedSmtpIds)) {
+            $campaign->smtpConfigs()->sync($selectedSmtpIds);
         } else {
             $campaign->smtpConfigs()->detach();
         }
@@ -1169,11 +1181,16 @@ class CampaignController extends Controller
             'name' => $campaign->name . ' (Copy)',
             'from_name' => $campaign->from_name,
             'reply_to' => $campaign->reply_to,
-            'emails_per_hour' => $campaign->emails_per_hour,
-            'min_delay_seconds' => $campaign->min_delay_seconds,
-            'max_delay_seconds' => $campaign->max_delay_seconds,
+            'use_all_smtps' => $campaign->use_all_smtps,
             'status' => Campaign::STATUS_DRAFT,
         ]);
+
+        if (!$campaign->use_all_smtps) {
+            $smtpIds = $campaign->smtpConfigs()->pluck('smtp_configs.id')->toArray();
+            if (!empty($smtpIds)) {
+                $newCampaign->smtpConfigs()->sync($smtpIds);
+            }
+        }
 
         // Copy subject lines
         foreach ($campaign->subjectLines as $subject) {
@@ -1193,10 +1210,11 @@ class CampaignController extends Controller
             ]);
         }
 
-        // Copy contact list associations
+        // Copy contact list associations and sync recipients
         $contactListIds = $campaign->contactLists->pluck('id')->toArray();
         if (!empty($contactListIds)) {
             $newCampaign->contactLists()->attach($contactListIds);
+            $this->syncRecipientsFromLists($newCampaign, $contactListIds);
         }
 
         return redirect()->route('campaigns.show', $newCampaign)

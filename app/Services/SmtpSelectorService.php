@@ -77,12 +77,11 @@ class SmtpSelectorService
                 ? $campaign->smtpConfigs->pluck('id')->all()
                 : $campaign->smtpConfigs()->pluck('smtp_configs.id')->all();
 
-            if (empty($allowedIds)) {
-                return collect();
+            // Filter to specific attached SMTPs when present; if pivot table is empty (e.g. legacy/unattached campaign), fall back to user's active SMTP pool so sending never stalls
+            if (!empty($allowedIds)) {
+                $allowedMap = array_flip($allowedIds);
+                $smtps = $smtps->filter(fn(SmtpConfig $s) => isset($allowedMap[$s->id]));
             }
-
-            $allowedMap = array_flip($allowedIds);
-            $smtps = $smtps->filter(fn(SmtpConfig $s) => isset($allowedMap[$s->id]));
         }
 
         return $smtps;
