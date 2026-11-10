@@ -13,42 +13,38 @@ return new class extends Migration
     public function up(): void
     {
         // 1. Add has_pending_contacts flag to contact_lists
-        Schema::table('contact_lists', function (Blueprint $table) {
-            if (!Schema::hasColumn('contact_lists', 'has_pending_contacts')) {
-                $table->boolean('has_pending_contacts')->default(false)->after('total_contacts')->index();
-            }
-        });
+        if (!Schema::hasColumn('contact_lists', 'has_pending_contacts')) {
+            Schema::table('contact_lists', function (Blueprint $table) {
+                $table->boolean('has_pending_contacts')->default(false)->index();
+            });
+        }
 
         // 2. Add composite performance indexes to contacts
-        Schema::table('contacts', function (Blueprint $table) {
-            // Check if composite index already exists before adding
-            $sm = Schema::getConnection()->getDoctrineSchemaManager();
-            $indexes = array_keys($sm->listTableIndexes('contacts'));
-
-            if (!in_array('idx_contacts_list_status_id', $indexes)) {
+        try {
+            Schema::table('contacts', function (Blueprint $table) {
                 $table->index(['contact_list_id', 'validation_status', 'id'], 'idx_contacts_list_status_id');
-            }
-        });
+            });
+        } catch (\Throwable $e) {
+            // Index already exists
+        }
 
         // 3. Add composite performance index to recipients
-        Schema::table('recipients', function (Blueprint $table) {
-            $sm = Schema::getConnection()->getDoctrineSchemaManager();
-            $indexes = array_keys($sm->listTableIndexes('recipients'));
-
-            if (!in_array('idx_recipients_campaign_status_id', $indexes)) {
+        try {
+            Schema::table('recipients', function (Blueprint $table) {
                 $table->index(['campaign_id', 'status', 'id'], 'idx_recipients_campaign_status_id');
-            }
-        });
+            });
+        } catch (\Throwable $e) {
+            // Index already exists
+        }
 
         // 4. Add index to email_logs
-        Schema::table('email_logs', function (Blueprint $table) {
-            $sm = Schema::getConnection()->getDoctrineSchemaManager();
-            $indexes = array_keys($sm->listTableIndexes('email_logs'));
-
-            if (!in_array('idx_logs_campaign_status', $indexes)) {
+        try {
+            Schema::table('email_logs', function (Blueprint $table) {
                 $table->index(['campaign_id', 'status'], 'idx_logs_campaign_status');
-            }
-        });
+            });
+        } catch (\Throwable $e) {
+            // Index already exists
+        }
 
         // 5. Initialize has_pending_contacts flag for existing lists
         try {
