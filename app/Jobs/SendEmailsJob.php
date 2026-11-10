@@ -82,6 +82,15 @@ class SendEmailsJob implements ShouldQueue, ShouldBeUnique
             return;
         }
 
+        // Self-heal any unsent recipient in active campaigns that was prematurely marked 'replied' before sending
+        Recipient::whereIn('campaign_id', $campaigns->keys())
+            ->where('status', Recipient::STATUS_REPLIED)
+            ->whereNull('sent_at')
+            ->update([
+                'status' => Recipient::STATUS_VALID,
+                'replied_at' => null,
+            ]);
+
         // Share the same User model instance across campaigns of the same user for accurate in-memory quota tracking
         $usersById = [];
         foreach ($campaigns as $campaign) {
@@ -110,6 +119,37 @@ class SendEmailsJob implements ShouldQueue, ShouldBeUnique
 
                 // Skip campaign if user has reached their quota
                 if ($campaign->user && !$campaign->user->canSendEmails(1)) {
+                    continue;
+                }
+
+                // Refill recipient buffer in batches of 50 before selecting an SMTP so completed campaigns finish immediately
+                if (empty($recipientBuffers[$campaignId])) {
+                    $recipientBuffers[$campaignId] = $campaign->recipients()
+                        ->readyToSend()
+                        ->orderBy('id', 'asc')
+                        ->limit(50)
+                        ->get()
+                        ->all();
+                }
+
+                if (empty($recipientBuffers[$campaignId])) {
+                    $hasRemainingUnsent = $campaign->recipients()
+                        ->whereIn('status', [
+                            Recipient::STATUS_VALID,
+                            Recipient::STATUS_PENDING,
+                            Recipient::STATUS_VALIDATING,
+                        ])
+                        ->exists();
+
+                    if (!$hasRemainingUnsent) {
+                        $campaign->update([
+                            'status' => Campaign::STATUS_COMPLETED,
+                            'completed_at' => now(),
+                        ]);
+                        Log::info("SendEmailsJob: Campaign {$campaign->id} completed.");
+                    }
+
+                    $campaigns->forget($campaignId);
                     continue;
                 }
 

@@ -84,12 +84,14 @@
                                         $total = $campaign['stats']['total'];
                                         $sent = $campaign['stats']['sent'];
                                         $failed = $campaign['stats']['failed'];
-                                        $progress = $total > 0 ? (($sent + $failed) / $total) * 100 : 0;
+                                        $bounced = $campaign['stats']['bounced'] ?? 0;
+                                        $processed = $sent + $failed + $bounced;
+                                        $progress = $total > 0 ? min(100, ($processed / $total) * 100) : 0;
                                     @endphp
                                     <div class="mt-3">
                                         <div class="flex justify-between text-xs text-gray-500 mb-1">
                                             <span>Progress</span>
-                                            <span>{{ $sent + $failed }} / {{ $total }} ({{ $sent }} sent, {{ $failed }} failed)</span>
+                                            <span>{{ $processed }} / {{ $total }} ({{ $sent }} sent, {{ $failed }} failed{{ $bounced > 0 ? ", {$bounced} bounced" : '' }})</span>
                                         </div>
                                         <div class="w-full bg-gray-200 rounded-full h-2">
                                             <div class="h-2 rounded-full bg-indigo-500" style="width: {{ $progress }}%"></div>

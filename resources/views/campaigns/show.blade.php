@@ -206,6 +206,18 @@
                     </div>
                 </div>
 
+                <div class="flex-1" style="min-width: 100px; padding: 0 0.4rem;">
+                    <div class="bg-emerald-50 rounded-lg shadow-sm p-3 border border-emerald-200 text-center flex flex-col justify-center h-full">
+                        <div class="text-xl font-bold text-emerald-600">{{ $stats['replied'] ?? 0 }}</div>
+                        <div class="text-[11px] text-emerald-700 uppercase tracking-wider mt-1 font-semibold flex flex-col items-center">
+                            <span>💬 Replied</span>
+                            @if(($stats['sent'] ?? 0) > 0)
+                                <span class="text-[10px] text-emerald-500 normal-case mt-0.5">({{ number_format((($stats['replied'] ?? 0) / $stats['sent']) * 100, 1) }}%)</span>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
             <!-- Progress Bar -->
@@ -213,12 +225,14 @@
                 $total = $stats['total'];
                 $sent = $stats['sent'];
                 $failed = $stats['failed'];
-                $pct = $total > 0 ? (($sent + $failed) / $total) * 100 : 0;
+                $bounced = $stats['bounced'] ?? 0;
+                $processed = $sent + $failed + $bounced;
+                $pct = $total > 0 ? min(100, ($processed / $total) * 100) : 0;
             @endphp
             <div class="bg-white p-4 rounded-lg shadow-sm mb-6">
                 <div class="flex justify-between text-sm text-gray-600 mb-2">
                     <span>Overall Progress</span>
-                    <span>{{ number_format($pct, 1) }}% Complete ({{ $sent }} sent, {{ $failed }} failed of {{ $total }})</span>
+                    <span>{{ number_format($pct, 1) }}% Complete ({{ $sent }} sent, {{ $failed }} failed{{ $bounced > 0 ? ", {$bounced} bounced" : '' }} of {{ $total }})</span>
                 </div>
                 <div class="w-full bg-gray-200 rounded-full h-3">
                     <div class="h-3 rounded-full bg-indigo-500" style="width: {{ $pct }}%"></div>

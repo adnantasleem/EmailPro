@@ -21,6 +21,22 @@ class RecipientController extends Controller
                 $query->bounced();
             } elseif ($request->status === 'failed') {
                 $query->failedNonBounce();
+            } elseif ($request->status === 'sent') {
+                $query->where(function ($q) {
+                    $q->where('status', 'sent')
+                      ->orWhere(function ($q2) {
+                          $q2->whereIn('status', ['replied', 'unsubscribed'])
+                             ->whereNotNull('sent_at');
+                      });
+                });
+            } elseif ($request->status === 'valid') {
+                $query->where(function ($q) {
+                    $q->where('status', 'valid')
+                      ->orWhere(function ($q2) {
+                          $q2->where('status', 'replied')
+                             ->whereNull('sent_at');
+                      });
+                });
             } else {
                 $query->where('status', $request->status);
             }
@@ -42,14 +58,16 @@ class RecipientController extends Controller
 
         $recipients = $query->with(['smtpConfig', 'latestEmailLog.smtpConfig'])->latest()->paginate(50)->withQueryString();
 
+        $stats = $campaign->stats;
         $statusCounts = [
-            'all' => $campaign->recipients()->count(),
-            'pending' => $campaign->recipients()->status('pending')->count(),
-            'valid' => $campaign->recipients()->status('valid')->count(),
-            'invalid' => $campaign->recipients()->whereIn('status', ['invalid', 'disposable'])->count(),
-            'sent' => $campaign->recipients()->status('sent')->count(),
-            'failed' => $campaign->recipients()->failedNonBounce()->count(),
-            'bounced' => $campaign->recipients()->bounced()->count(),
+            'all' => $stats['total'],
+            'pending' => $stats['pending'],
+            'valid' => $stats['valid'],
+            'invalid' => $stats['invalid'],
+            'sent' => $stats['sent'],
+            'replied' => $stats['replied'] ?? 0,
+            'failed' => $stats['failed'],
+            'bounced' => $stats['bounced'],
         ];
 
         // Fetch SMTP configs used in this campaign for filtering

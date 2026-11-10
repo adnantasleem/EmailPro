@@ -40,6 +40,10 @@
                    class="px-4 py-2 rounded-md text-sm font-medium {{ request('status') === 'sent' ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
                     Sent ({{ $statusCounts['sent'] }})
                 </a>
+                <a href="{{ route('recipients.index', ['campaign' => $campaign, 'status' => 'replied']) }}" 
+                   class="px-4 py-2 rounded-md text-sm font-medium {{ request('status') === 'replied' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
+                    Replied ({{ $statusCounts['replied'] ?? 0 }})
+                </a>
                 <a href="{{ route('recipients.index', ['campaign' => $campaign, 'status' => 'failed']) }}" 
                    class="px-4 py-2 rounded-md text-sm font-medium {{ request('status') === 'failed' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
                     Failed ({{ $statusCounts['failed'] }})
@@ -115,6 +119,8 @@
                                             <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-red-100 text-red-800">Invalid</span>
                                         @elseif($recipient->status === 'sent')
                                             <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800">Sent</span>
+                                        @elseif($recipient->status === 'replied')
+                                            <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800">Replied</span>
                                         @elseif($recipient->status === 'failed')
                                             <span class="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-orange-100 text-orange-800" title="{{ $recipient->error_message }}">Failed</span>
                                             @if($recipient->error_message)

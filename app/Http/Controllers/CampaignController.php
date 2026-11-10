@@ -237,9 +237,6 @@ class CampaignController extends Controller
 
         $stats = $campaign->stats;
 
-        // Add opened count to stats
-        $stats['opened'] = $campaign->recipients()->whereNotNull('opened_at')->count();
-
         $subjectStats = $rotator->getSubjectStats($campaign);
         $bodyStats = $rotator->getBodyStats($campaign);
 
@@ -294,9 +291,6 @@ class CampaignController extends Controller
         }
 
         $stats = $campaign->stats;
-
-        // Add opened count to stats
-        $stats['opened'] = $campaign->recipients()->whereNotNull('opened_at')->count();
 
         $subjectStats = $rotator->getSubjectStats($campaign);
         $bodyStats = $rotator->getBodyStats($campaign);

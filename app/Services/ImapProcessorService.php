@@ -18,8 +18,10 @@ class ImapProcessorService
      * @param int $maxMessages Maximum messages to process per check to prevent memory/timeout exhaustion
      * @param bool $throwOnError Whether to rethrow connection/folder errors (e.g. for manual UI sync feedback)
      */
-    public function processInbox(SmtpConfig $smtp, int $maxMessages = 50, bool $throwOnError = false): int
+    public function processInbox(SmtpConfig $smtp, int $maxMessages = 50, bool $throwOnError = false, int $maxSeconds = 20): int
     {
+        $startTime = microtime(true);
+
         // Always update last_bounce_check_at first so a failing/unreachable IMAP server rotates to the back of the queue
         $smtp->update(['last_bounce_check_at' => now()]);
 
@@ -55,6 +57,10 @@ class ImapProcessorService
             ]);
 
             foreach ($foldersToScan as $folder) {
+                if ((microtime(true) - $startTime) >= $maxSeconds) {
+                    break;
+                }
+
                 $folderKey = strtolower($folder->path ?? $folder->name ?? 'inbox');
 
                 // Search recent emails from last 3 days (newest first, both Seen & Unseen so webmail-opened or spam-filtered replies/bounces are never missed)
@@ -89,6 +95,10 @@ class ImapProcessorService
                 }
 
                 foreach ($messages as $message) {
+                    if ((microtime(true) - $startTime) >= $maxSeconds) {
+                        break 2;
+                    }
+
                     try {
                         $rawUid = method_exists($message, 'getUid') ? (string) $message->getUid() : null;
                         $scopedUid = $rawUid ? "{$folderKey}:{$rawUid}" : null;
@@ -536,13 +546,18 @@ protected function isBounceEmail($headerInfo, string $header, string $body): boo
         $email = strtolower(trim($email));
         
         DB::transaction(function () use ($smtp, $email, $subject, $bodyText, $bodyHtml, &$wasReply) {
-            // Find the most recent recipient in any campaign for this user using indexed lowercase email lookup
+            // Find the most recent SENT recipient in any campaign for this user (never match unsent/pending/valid recipients)
             $recipient = Recipient::whereIn(
                     'campaign_id',
                     \App\Models\Campaign::where('user_id', $smtp->user_id)->select('id')
                 )
                 ->where('email', $email)
-                ->orderByRaw("CASE WHEN status IN ('sent', 'replied') THEN 0 ELSE 1 END")
+                ->whereIn('status', [
+                    Recipient::STATUS_SENT,
+                    Recipient::STATUS_REPLIED,
+                    Recipient::STATUS_UNSUBSCRIBED,
+                ])
+                ->whereNotNull('sent_at')
                 ->orderBy('sent_at', 'desc')
                 ->orderBy('updated_at', 'desc')
                 ->first();
